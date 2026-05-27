@@ -32,6 +32,18 @@ pub struct Job {
     pub attempts: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredMessage {
+    pub id: i64,
+    pub wechat_msg_id: Option<String>,
+    pub from_openid_hash: String,
+    pub create_time: Option<i64>,
+    pub received_at: String,
+    pub message_type: String,
+    pub content_text: Option<String>,
+    pub raw_dir: String,
+}
+
 impl Store {
     pub async fn connect(database_url: &str) -> Result<Self, BridgeError> {
         let pool = SqlitePoolOptions::new()
@@ -202,6 +214,92 @@ impl Store {
             attempts: row.get("attempts"),
         }))
     }
+
+    pub async fn get_message(&self, message_id: i64) -> Result<StoredMessage, BridgeError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, wechat_msg_id, from_openid_hash, create_time, received_at,
+                   message_type, content_text, raw_dir
+            FROM messages
+            WHERE id = ?1
+            "#,
+        )
+        .bind(message_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+
+        Ok(StoredMessage {
+            id: row.get("id"),
+            wechat_msg_id: row.get("wechat_msg_id"),
+            from_openid_hash: row.get("from_openid_hash"),
+            create_time: row.get("create_time"),
+            received_at: row.get("received_at"),
+            message_type: row.get("message_type"),
+            content_text: row.get("content_text"),
+            raw_dir: row.get("raw_dir"),
+        })
+    }
+
+    pub async fn mark_message_source_written(
+        &self,
+        message_id: i64,
+        source_path: &str,
+        processed_text: &str,
+    ) -> Result<(), BridgeError> {
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET status = 'source_written',
+                source_path = ?2,
+                processed_text = ?3,
+                processed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?1
+            "#,
+        )
+        .bind(message_id)
+        .bind(source_path)
+        .bind(processed_text)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+        Ok(())
+    }
+
+    pub async fn mark_job_done(&self, job_id: i64) -> Result<(), BridgeError> {
+        sqlx::query(
+            r#"
+            UPDATE jobs
+            SET status = 'done',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?1
+            "#,
+        )
+        .bind(job_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+        Ok(())
+    }
+
+    pub async fn mark_job_failed(&self, job_id: i64, error: &str) -> Result<(), BridgeError> {
+        sqlx::query(
+            r#"
+            UPDATE jobs
+            SET status = 'failed',
+                last_error = ?2,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?1
+            "#,
+        )
+        .bind(job_id)
+        .bind(error)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -307,5 +405,38 @@ mod tests {
             .await
             .unwrap();
         assert!(none.is_none());
+    }
+
+    #[tokio::test]
+    async fn marks_message_source_written_and_job_done() {
+        let store = test_store().await;
+        let message_id = store
+            .insert_message_idempotent(&message("msg_1"))
+            .await
+            .unwrap();
+        let job_id = store
+            .create_job_once(message_id, "process_message", "2026-05-27T21:30:15+08:00")
+            .await
+            .unwrap();
+
+        store
+            .mark_message_source_written(message_id, "/tmp/source.md", "hello")
+            .await
+            .unwrap();
+        store.mark_job_done(job_id).await.unwrap();
+
+        let status: String = sqlx::query_scalar("SELECT status FROM messages WHERE id = ?1")
+            .bind(message_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        let job_status: String = sqlx::query_scalar("SELECT status FROM jobs WHERE id = ?1")
+            .bind(job_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+
+        assert_eq!(status, "source_written");
+        assert_eq!(job_status, "done");
     }
 }

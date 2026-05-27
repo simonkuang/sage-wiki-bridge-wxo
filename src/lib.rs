@@ -8,6 +8,7 @@ pub mod source;
 pub mod store;
 pub mod telemetry;
 pub mod wechat;
+pub mod worker;
 
 pub fn run() -> Result<(), error::BridgeError> {
     dotenvy::dotenv().ok();
