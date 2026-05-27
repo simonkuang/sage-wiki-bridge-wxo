@@ -6,6 +6,7 @@ rust-version = "1.95"
 
 [dependencies]
 axum = "0.8"
+base64 = "0.22"
 constant_time_eq = "0.3"
 dotenvy = "0.15"
 quick-xml = { version = "0.38", features = ["serialize"] }

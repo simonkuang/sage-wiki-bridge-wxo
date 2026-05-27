@@ -1470,6 +1470,7 @@ name = "sage-wiki-bridge"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "constant_time_eq",
  "dotenvy",
  "pretty_assertions",

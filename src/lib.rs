@@ -2,6 +2,7 @@ pub mod archive;
 pub mod config;
 pub mod enrich;
 pub mod error;
+pub mod llm;
 pub mod media;
 pub mod preprocess;
 pub mod receiver;
