@@ -17,7 +17,6 @@ use crate::{
 pub struct GeminiMediaJobProcessor {
     media_client: WechatMediaClient,
     llm_provider: Arc<dyn LlmProvider>,
-    access_token: String,
     raw_root: PathBuf,
     image_prompt: String,
     voice_prompt: String,
@@ -28,13 +27,11 @@ impl GeminiMediaJobProcessor {
     pub fn new(
         media_client: WechatMediaClient,
         llm_provider: Arc<dyn LlmProvider>,
-        access_token: impl Into<String>,
         raw_root: impl Into<PathBuf>,
     ) -> Self {
         Self {
             media_client,
             llm_provider,
-            access_token: access_token.into(),
             raw_root: raw_root.into(),
             image_prompt: "Describe this image for a personal knowledge base.".to_string(),
             voice_prompt: "Transcribe and summarize this voice message.".to_string(),
@@ -60,9 +57,10 @@ impl MediaJobProcessor for GeminiMediaJobProcessor {
                 .raw_root
                 .join(message_key(message))
                 .join(format!("media.original{}", extension_for_mime(mime_type)));
+            let access_token = self.media_client.fetch_access_token().await?;
             let downloaded = self
                 .media_client
-                .download_media(&self.access_token, &MediaId::new(media_id), &target_path)
+                .download_media(&access_token.token, &MediaId::new(media_id), &target_path)
                 .await?;
             let output = self
                 .llm_provider
@@ -144,7 +142,7 @@ fn extension_for_mime(mime: &str) -> &'static str {
 mod tests {
     use std::{fs, time::Duration};
 
-    use axum::{Router, response::IntoResponse, routing::get};
+    use axum::{Router, extract::Request, response::IntoResponse, routing::get};
     use tokio::net::TcpListener;
 
     use crate::{
@@ -174,8 +172,12 @@ mod tests {
     }
 
     async fn spawn_mock_wechat_media() -> String {
-        async fn handler() -> impl IntoResponse {
-            b"fake-image".as_slice().into_response()
+        async fn handler(request: Request) -> impl IntoResponse {
+            if request.uri().path() == "/cgi-bin/token" {
+                r#"{"access_token":"access-token-1","expires_in":7200}"#.into_response()
+            } else {
+                b"fake-image".as_slice().into_response()
+            }
         }
         let app = Router::new().route("/{*path}", get(handler));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -227,7 +229,6 @@ mod tests {
             )
             .unwrap(),
             Arc::new(FakeLlmProvider),
-            "access-token-1",
             raw_root.path(),
         );
 

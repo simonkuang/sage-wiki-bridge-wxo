@@ -18,7 +18,7 @@ sha2 = "0.10"
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "migrate"] }
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "macros", "serde"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 url = "2"
