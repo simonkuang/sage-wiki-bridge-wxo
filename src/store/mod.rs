@@ -68,6 +68,63 @@ pub struct StoredMessage {
     pub raw_dir: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageListQuery {
+    pub page: u32,
+    pub per_page: u32,
+    pub keyword: Option<String>,
+    pub sort_desc: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageListItem {
+    pub id: i64,
+    pub received_at: String,
+    pub message_type: String,
+    pub from_openid_hash: String,
+    pub status: String,
+    pub content_preview: Option<String>,
+    pub processed_preview: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageListPage {
+    pub items: Vec<MessageListItem>,
+    pub total: i64,
+    pub page: u32,
+    pub per_page: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessageDetail {
+    pub id: i64,
+    pub request_id: String,
+    pub wechat_msg_id: Option<String>,
+    pub from_openid_hash: String,
+    pub create_time: Option<i64>,
+    pub received_at: String,
+    pub message_type: String,
+    pub content_text: Option<String>,
+    pub media_id: Option<String>,
+    pub thumb_media_id: Option<String>,
+    pub pic_url: Option<String>,
+    pub voice_format: Option<String>,
+    pub voice_recognition: Option<String>,
+    pub location_lat: Option<f64>,
+    pub location_lng: Option<f64>,
+    pub location_scale: Option<i32>,
+    pub location_label: Option<String>,
+    pub link_title: Option<String>,
+    pub link_description: Option<String>,
+    pub link_url: Option<String>,
+    pub authorized: bool,
+    pub status: String,
+    pub raw_dir: String,
+    pub source_path: Option<String>,
+    pub processed_text: Option<String>,
+    pub processed_at: Option<String>,
+}
+
 impl Store {
     pub async fn connect(database_url: &str) -> Result<Self, BridgeError> {
         let pool = SqlitePoolOptions::new()
@@ -356,6 +413,146 @@ impl Store {
         .map_err(|err| BridgeError::Database(err.to_string()))?;
         Ok(())
     }
+
+    pub async fn list_messages(
+        &self,
+        query: &MessageListQuery,
+    ) -> Result<MessageListPage, BridgeError> {
+        let page = query.page.max(1);
+        let per_page = query.per_page.clamp(1, 100);
+        let offset = i64::from((page - 1) * per_page);
+        let limit = i64::from(per_page);
+        let keyword = query.keyword.as_deref().filter(|value| !value.is_empty());
+        let keyword_like = keyword.map(|value| format!("%{value}%"));
+
+        let total: i64 = if let Some(keyword_like) = &keyword_like {
+            sqlx::query_scalar(
+                r#"
+                SELECT COUNT(*)
+                FROM messages
+                WHERE content_text LIKE ?1
+                   OR processed_text LIKE ?1
+                   OR link_url LIKE ?1
+                   OR location_label LIKE ?1
+                   OR from_openid_hash LIKE ?1
+                "#,
+            )
+            .bind(keyword_like)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|err| BridgeError::Database(err.to_string()))?
+        } else {
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|err| BridgeError::Database(err.to_string()))?
+        };
+
+        let sql = if query.sort_desc {
+            list_messages_sql("DESC", keyword.is_some())
+        } else {
+            list_messages_sql("ASC", keyword.is_some())
+        };
+        let mut statement = sqlx::query(&sql);
+        if let Some(keyword_like) = &keyword_like {
+            statement = statement.bind(keyword_like);
+        }
+        let rows = statement
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| BridgeError::Database(err.to_string()))?;
+
+        Ok(MessageListPage {
+            items: rows
+                .into_iter()
+                .map(|row| MessageListItem {
+                    id: row.get("id"),
+                    received_at: row.get("received_at"),
+                    message_type: row.get("message_type"),
+                    from_openid_hash: row.get("from_openid_hash"),
+                    status: row.get("status"),
+                    content_preview: row.get("content_preview"),
+                    processed_preview: row.get("processed_preview"),
+                })
+                .collect(),
+            total,
+            page,
+            per_page,
+        })
+    }
+
+    pub async fn get_message_detail(&self, message_id: i64) -> Result<MessageDetail, BridgeError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, request_id, wechat_msg_id, from_openid_hash, create_time, received_at,
+                   message_type, content_text,
+                   media_id, thumb_media_id, pic_url, voice_format, voice_recognition,
+                   location_lat, location_lng, location_scale, location_label,
+                   link_title, link_description, link_url,
+                   authorized, status, raw_dir, source_path, processed_text, processed_at
+            FROM messages
+            WHERE id = ?1
+            "#,
+        )
+        .bind(message_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+
+        Ok(MessageDetail {
+            id: row.get("id"),
+            request_id: row.get("request_id"),
+            wechat_msg_id: row.get("wechat_msg_id"),
+            from_openid_hash: row.get("from_openid_hash"),
+            create_time: row.get("create_time"),
+            received_at: row.get("received_at"),
+            message_type: row.get("message_type"),
+            content_text: row.get("content_text"),
+            media_id: row.get("media_id"),
+            thumb_media_id: row.get("thumb_media_id"),
+            pic_url: row.get("pic_url"),
+            voice_format: row.get("voice_format"),
+            voice_recognition: row.get("voice_recognition"),
+            location_lat: row.get("location_lat"),
+            location_lng: row.get("location_lng"),
+            location_scale: row.get("location_scale"),
+            location_label: row.get("location_label"),
+            link_title: row.get("link_title"),
+            link_description: row.get("link_description"),
+            link_url: row.get("link_url"),
+            authorized: row.get::<i64, _>("authorized") == 1,
+            status: row.get("status"),
+            raw_dir: row.get("raw_dir"),
+            source_path: row.get("source_path"),
+            processed_text: row.get("processed_text"),
+            processed_at: row.get("processed_at"),
+        })
+    }
+}
+
+fn list_messages_sql(order: &str, with_keyword: bool) -> String {
+    let (filter, limit_placeholder, offset_placeholder) = if with_keyword {
+        (
+            "WHERE content_text LIKE ?1 OR processed_text LIKE ?1 OR link_url LIKE ?1 OR location_label LIKE ?1 OR from_openid_hash LIKE ?1",
+            "?2",
+            "?3",
+        )
+    } else {
+        ("", "?1", "?2")
+    };
+    format!(
+        r#"
+        SELECT id, received_at, message_type, from_openid_hash, status,
+               substr(COALESCE(content_text, link_url, location_label, media_id, ''), 1, 160) AS content_preview,
+               substr(COALESCE(processed_text, ''), 1, 160) AS processed_preview
+        FROM messages
+        {filter}
+        ORDER BY received_at {order}, id {order}
+        LIMIT {limit_placeholder} OFFSET {offset_placeholder}
+        "#
+    )
 }
 
 #[cfg(test)]

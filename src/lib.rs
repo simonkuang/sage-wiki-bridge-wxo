@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod archive;
 pub mod config;
 pub mod enrich;
@@ -17,6 +18,7 @@ use std::{path::Path, sync::Arc};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
+    admin::AdminState,
     archive::RawArchive,
     config::{AppConfig, EnvSecrets},
     enrich::{
@@ -69,9 +71,14 @@ pub async fn run() -> Result<(), error::BridgeError> {
             wechat_token,
             callback_path: config.callback_path.clone(),
         },
-        store,
+        store: store.clone(),
         raw_archive: RawArchive::new(&config.raw_archive_dir, config.raw_archive_full),
-    });
+    })
+    .merge(admin::router(AdminState {
+        store,
+        view_key: secrets.admin_view_key.clone(),
+        whitelist_join_key: secrets.whitelist_join_key.clone(),
+    }));
     let listener = tokio::net::TcpListener::bind(&config.bind_addr)
         .await
         .map_err(|err| {
