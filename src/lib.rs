@@ -70,6 +70,8 @@ pub async fn run() -> Result<(), error::BridgeError> {
         config: ReceiverConfig {
             wechat_token,
             callback_path: config.callback_path.clone(),
+            honeypot_reply_enabled: config.honeypot_reply_enabled,
+            honeypot_reply_text: config.honeypot_reply_text.clone(),
         },
         store: store.clone(),
         raw_archive: RawArchive::new(&config.raw_archive_dir, config.raw_archive_full),

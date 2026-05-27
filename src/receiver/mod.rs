@@ -15,13 +15,15 @@ use crate::{
     archive::RawArchive,
     error::BridgeError,
     store::{MessageInsert, Store},
-    wechat::{IncomingMessage, OpenIdHash, parse_plain_message, verify_signature},
+    wechat::{IncomingMessage, OpenId, OpenIdHash, parse_plain_message, verify_signature},
 };
 
 #[derive(Debug, Clone)]
 pub struct ReceiverConfig {
     pub wechat_token: String,
     pub callback_path: String,
+    pub honeypot_reply_enabled: bool,
+    pub honeypot_reply_text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +77,8 @@ async fn receive_callback(
     body: String,
 ) -> Response {
     match receive_plain_message(&state, &query, &body).await {
-        Ok(()) => "".into_response(),
+        Ok(Some(reply_xml)) => reply_xml.into_response(),
+        Ok(None) => "".into_response(),
         Err(BridgeError::WechatSignatureInvalid) => StatusCode::FORBIDDEN.into_response(),
         Err(err) => {
             tracing::warn!(component = "receiver", error = %err, "callback failed");
@@ -88,7 +91,7 @@ async fn receive_plain_message(
     state: &ReceiverState,
     query: &CallbackQuery,
     body: &str,
-) -> Result<(), BridgeError> {
+) -> Result<Option<String>, BridgeError> {
     if !verify_signature(
         &state.config.wechat_token,
         &query.timestamp,
@@ -168,7 +171,35 @@ async fn receive_plain_message(
             .await?;
     }
 
-    Ok(())
+    if !authorized && state.config.honeypot_reply_enabled {
+        tracing::info!(
+            component = "receiver",
+            message_id,
+            openid_hash = %OpenIdHash::sha256_for_display(&common.from_user_name),
+            "honeypot reply generated"
+        );
+        return Ok(Some(passive_text_reply(
+            &common.from_user_name,
+            &common.to_user_name,
+            &state.config.honeypot_reply_text,
+        )));
+    }
+
+    Ok(None)
+}
+
+fn passive_text_reply(to_user: &OpenId, from_user: &str, content: &str) -> String {
+    format!(
+        "<xml><ToUserName><![CDATA[{}]]></ToUserName><FromUserName><![CDATA[{}]]></FromUserName><CreateTime>{}</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[{}]]></Content></xml>",
+        to_user.as_str(),
+        from_user,
+        OffsetDateTime::now_utc().unix_timestamp(),
+        sanitize_cdata(content)
+    )
+}
+
+fn sanitize_cdata(value: &str) -> String {
+    value.replace("]]>", "]]]]><![CDATA[>")
 }
 
 fn media_id(message: &IncomingMessage) -> Option<String> {
@@ -302,6 +333,8 @@ mod tests {
             config: ReceiverConfig {
                 wechat_token: "bridge-token".to_string(),
                 callback_path: "/wechat/callback".to_string(),
+                honeypot_reply_enabled: false,
+                honeypot_reply_text: "Message received.".to_string(),
             },
             store,
             raw_archive: RawArchive::new(temp, raw_archive_full),
@@ -419,6 +452,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(message_status, "ignored");
+    }
+
+    #[tokio::test]
+    async fn post_callback_honeypot_replies_to_non_whitelisted_message() {
+        let mut state = test_state(false).await;
+        state.config.honeypot_reply_enabled = true;
+        state.config.honeypot_reply_text = "收到".to_string();
+        let app = router(state);
+        let uri = signed_path("/wechat/callback", "bridge-token", "1780000000", "nonce1");
+        let xml = include_str!("../../tests/fixtures/wechat/text.xml")
+            .replace("openid-user-1", "openid-not-whitelisted");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .body(Body::from(xml))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let reply = String::from_utf8(body.to_vec()).unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(reply.contains("<MsgType><![CDATA[text]]></MsgType>"));
+        assert!(reply.contains("<Content><![CDATA[收到]]></Content>"));
+        assert!(reply.contains("<ToUserName><![CDATA[openid-not-whitelisted]]></ToUserName>"));
     }
 
     #[tokio::test]

@@ -50,6 +50,8 @@ pub struct AppConfig {
     pub raw_archive_full: bool,
     pub source_dir: PathBuf,
     pub callback_path: String,
+    pub honeypot_reply_enabled: bool,
+    pub honeypot_reply_text: String,
     pub worker_enabled: bool,
     pub worker_interval: Duration,
     pub http_timeout: Duration,
@@ -80,6 +82,8 @@ impl AppConfig {
             raw_archive_full: get_bool(&lookup, "RAW_ARCHIVE_FULL", true)?,
             source_dir: PathBuf::from(get_string(&lookup, "SAGE_WIKI_SOURCE_DIR", "source")),
             callback_path: get_string(&lookup, "WECHAT_CALLBACK_PATH", "/wechat/callback"),
+            honeypot_reply_enabled: get_bool(&lookup, "HONEYPOT_REPLY_ENABLED", false)?,
+            honeypot_reply_text: get_string(&lookup, "HONEYPOT_REPLY_TEXT", "Message received."),
             worker_enabled: get_bool(&lookup, "WORKER_ENABLED", true)?,
             worker_interval: Duration::from_millis(get_u64(&lookup, "WORKER_INTERVAL_MS", 1000)?),
             http_timeout: Duration::from_secs(get_u64(&lookup, "HTTP_TIMEOUT_SECONDS", 30)?),
@@ -173,6 +177,8 @@ mod tests {
         assert_eq!(config.bind_addr, "127.0.0.1:8080");
         assert_eq!(config.database_url, "sqlite://data/bridge.sqlite3");
         assert_eq!(config.callback_path, "/wechat/callback");
+        assert!(!config.honeypot_reply_enabled);
+        assert_eq!(config.honeypot_reply_text, "Message received.");
         assert!(config.worker_enabled);
         assert_eq!(config.worker_interval, Duration::from_millis(1000));
         assert_eq!(config.source_dir, PathBuf::from("source"));
@@ -183,6 +189,8 @@ mod tests {
         let config = config_from_pairs(&[
             ("APP_BIND_ADDR", "0.0.0.0:18080"),
             ("RAW_ARCHIVE_FULL", "false"),
+            ("HONEYPOT_REPLY_ENABLED", "true"),
+            ("HONEYPOT_REPLY_TEXT", "收到"),
             ("WORKER_INTERVAL_MS", "250"),
             ("TENCENT_LBS_RADIUS_METERS", "500"),
         ])
@@ -190,6 +198,8 @@ mod tests {
 
         assert_eq!(config.bind_addr, "0.0.0.0:18080");
         assert!(!config.raw_archive_full);
+        assert!(config.honeypot_reply_enabled);
+        assert_eq!(config.honeypot_reply_text, "收到");
         assert_eq!(config.worker_interval, Duration::from_millis(250));
         assert_eq!(config.tencent_lbs_radius_meters, Some(500));
     }
