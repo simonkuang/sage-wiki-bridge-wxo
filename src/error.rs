@@ -20,6 +20,9 @@ pub enum BridgeError {
     #[error("external payload invalid: {0}")]
     ExternalPayloadInvalid(String),
 
+    #[error("external request failed: {0}")]
+    ExternalRequest(String),
+
     #[error("database error: {0}")]
     Database(String),
 
