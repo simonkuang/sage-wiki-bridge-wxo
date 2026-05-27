@@ -7,7 +7,7 @@ pub struct Store {
     pool: SqlitePool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MessageInsert {
     pub request_id: String,
     pub wechat_msg_id: Option<String>,
@@ -18,6 +18,13 @@ pub struct MessageInsert {
     pub received_at: String,
     pub message_type: String,
     pub content_text: Option<String>,
+    pub location_lat: Option<f64>,
+    pub location_lng: Option<f64>,
+    pub location_scale: Option<i32>,
+    pub location_label: Option<String>,
+    pub link_title: Option<String>,
+    pub link_description: Option<String>,
+    pub link_url: Option<String>,
     pub authorized: bool,
     pub status: String,
     pub raw_dir: String,
@@ -32,7 +39,7 @@ pub struct Job {
     pub attempts: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoredMessage {
     pub id: i64,
     pub wechat_msg_id: Option<String>,
@@ -41,6 +48,13 @@ pub struct StoredMessage {
     pub received_at: String,
     pub message_type: String,
     pub content_text: Option<String>,
+    pub location_lat: Option<f64>,
+    pub location_lng: Option<f64>,
+    pub location_scale: Option<i32>,
+    pub location_label: Option<String>,
+    pub link_title: Option<String>,
+    pub link_description: Option<String>,
+    pub link_url: Option<String>,
     pub raw_dir: String,
 }
 
@@ -111,9 +125,12 @@ impl Store {
             r#"
             INSERT OR IGNORE INTO messages (
               request_id, wechat_msg_id, to_user_name, from_openid, from_openid_hash,
-              create_time, received_at, message_type, content_text, authorized, status, raw_dir
+              create_time, received_at, message_type, content_text,
+              location_lat, location_lng, location_scale, location_label,
+              link_title, link_description, link_url,
+              authorized, status, raw_dir
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
             "#,
         )
         .bind(&message.request_id)
@@ -125,6 +142,13 @@ impl Store {
         .bind(&message.received_at)
         .bind(&message.message_type)
         .bind(&message.content_text)
+        .bind(message.location_lat)
+        .bind(message.location_lng)
+        .bind(message.location_scale)
+        .bind(&message.location_label)
+        .bind(&message.link_title)
+        .bind(&message.link_description)
+        .bind(&message.link_url)
         .bind(if message.authorized { 1 } else { 0 })
         .bind(&message.status)
         .bind(&message.raw_dir)
@@ -219,7 +243,10 @@ impl Store {
         let row = sqlx::query(
             r#"
             SELECT id, wechat_msg_id, from_openid_hash, create_time, received_at,
-                   message_type, content_text, raw_dir
+                   message_type, content_text,
+                   location_lat, location_lng, location_scale, location_label,
+                   link_title, link_description, link_url,
+                   raw_dir
             FROM messages
             WHERE id = ?1
             "#,
@@ -237,6 +264,13 @@ impl Store {
             received_at: row.get("received_at"),
             message_type: row.get("message_type"),
             content_text: row.get("content_text"),
+            location_lat: row.get("location_lat"),
+            location_lng: row.get("location_lng"),
+            location_scale: row.get("location_scale"),
+            location_label: row.get("location_label"),
+            link_title: row.get("link_title"),
+            link_description: row.get("link_description"),
+            link_url: row.get("link_url"),
             raw_dir: row.get("raw_dir"),
         })
     }
@@ -323,6 +357,13 @@ mod tests {
             received_at: "2026-05-27T21:30:15+08:00".to_string(),
             message_type: "text".to_string(),
             content_text: Some("hello".to_string()),
+            location_lat: None,
+            location_lng: None,
+            location_scale: None,
+            location_label: None,
+            link_title: None,
+            link_description: None,
+            link_url: None,
             authorized: true,
             status: "queued".to_string(),
             raw_dir: "data/raw/msg".to_string(),

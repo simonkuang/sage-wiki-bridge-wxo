@@ -15,7 +15,7 @@ use crate::{
     archive::RawArchive,
     error::BridgeError,
     store::{MessageInsert, Store},
-    wechat::{OpenIdHash, parse_plain_message, verify_signature},
+    wechat::{IncomingMessage, OpenIdHash, parse_plain_message, verify_signature},
 };
 
 #[derive(Debug, Clone)]
@@ -143,6 +143,13 @@ async fn receive_plain_message(
             received_at: received_at.clone(),
             message_type: message.msg_type().to_string(),
             content_text: message.content_text().map(ToOwned::to_owned),
+            location_lat: location_lat(&message),
+            location_lng: location_lng(&message),
+            location_scale: location_scale(&message),
+            location_label: location_label(&message),
+            link_title: link_title(&message),
+            link_description: link_description(&message),
+            link_url: link_url(&message),
             authorized,
             status: status.to_string(),
             raw_dir,
@@ -157,6 +164,55 @@ async fn receive_plain_message(
     }
 
     Ok(())
+}
+
+fn location_lat(message: &IncomingMessage) -> Option<f64> {
+    match message {
+        IncomingMessage::Location(message) => Some(message.latitude),
+        _ => None,
+    }
+}
+
+fn location_lng(message: &IncomingMessage) -> Option<f64> {
+    match message {
+        IncomingMessage::Location(message) => Some(message.longitude),
+        _ => None,
+    }
+}
+
+fn location_scale(message: &IncomingMessage) -> Option<i32> {
+    match message {
+        IncomingMessage::Location(message) => message.scale,
+        _ => None,
+    }
+}
+
+fn location_label(message: &IncomingMessage) -> Option<String> {
+    match message {
+        IncomingMessage::Location(message) => message.label.clone(),
+        _ => None,
+    }
+}
+
+fn link_title(message: &IncomingMessage) -> Option<String> {
+    match message {
+        IncomingMessage::Link(message) => message.title.clone(),
+        _ => None,
+    }
+}
+
+fn link_description(message: &IncomingMessage) -> Option<String> {
+    match message {
+        IncomingMessage::Link(message) => message.description.clone(),
+        _ => None,
+    }
+}
+
+fn link_url(message: &IncomingMessage) -> Option<String> {
+    match message {
+        IncomingMessage::Link(message) => Some(message.url.as_str().to_string()),
+        _ => None,
+    }
 }
 
 fn request_id(timestamp: &str, nonce: &str) -> String {

@@ -1,16 +1,52 @@
-use std::path::PathBuf;
+use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 
 use crate::{
+    enrich::tencent_lbs::extract_location_summary,
     error::BridgeError,
-    preprocess::artifact::{ProcessedArtifact, ProcessedArtifactKind},
+    preprocess::{
+        artifact::{ProcessedArtifact, ProcessedArtifactKind},
+        link::process_link,
+        location::process_location,
+    },
     source::{SourceMetadata, SourceWriter},
     store::{Store, StoredMessage},
+    wechat::message::{CommonFields, LinkMessage, LocationMessage},
+    wechat::{OpenId, UrlString, WechatMsgId},
 };
 
-#[derive(Debug, Clone)]
+pub type WorkerFuture<T> = Pin<Box<dyn Future<Output = Result<T, BridgeError>> + Send>>;
+
+pub trait ExternalClients: Send + Sync {
+    fn reverse_geocode(&self, latitude: f64, longitude: f64) -> WorkerFuture<String>;
+    fn read_link(&self, url: &str) -> WorkerFuture<String>;
+}
+
+#[derive(Debug, Default)]
+pub struct NoopExternalClients;
+
+impl ExternalClients for NoopExternalClients {
+    fn reverse_geocode(&self, _latitude: f64, _longitude: f64) -> WorkerFuture<String> {
+        Box::pin(async {
+            Err(BridgeError::ExternalPayloadInvalid(
+                "reverse geocode client not configured".to_string(),
+            ))
+        })
+    }
+
+    fn read_link(&self, _url: &str) -> WorkerFuture<String> {
+        Box::pin(async {
+            Err(BridgeError::ExternalPayloadInvalid(
+                "jina reader client not configured".to_string(),
+            ))
+        })
+    }
+}
+
+#[derive(Clone)]
 pub struct Worker {
     store: Store,
     source_writer: SourceWriter,
+    external_clients: Arc<dyn ExternalClients>,
     worker_id: String,
     bridge_version: String,
 }
@@ -31,6 +67,23 @@ impl Worker {
         Self {
             store,
             source_writer,
+            external_clients: Arc::new(NoopExternalClients),
+            worker_id: worker_id.into(),
+            bridge_version: bridge_version.into(),
+        }
+    }
+
+    pub fn with_external_clients(
+        store: Store,
+        source_writer: SourceWriter,
+        external_clients: Arc<dyn ExternalClients>,
+        worker_id: impl Into<String>,
+        bridge_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            store,
+            source_writer,
+            external_clients,
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
         }
@@ -63,7 +116,7 @@ impl Worker {
         message_id: i64,
     ) -> Result<PathBuf, BridgeError> {
         let message = self.store.get_message(message_id).await?;
-        let artifact = artifact_from_stored_message(&message)?;
+        let artifact = self.artifact_from_stored_message(&message).await?;
         let metadata = metadata_from_stored_message(&message, &self.bridge_version);
         let result = self.source_writer.write_source(&artifact, &metadata)?;
         self.store
@@ -82,18 +135,63 @@ impl Worker {
         );
         Ok(result.path)
     }
+    async fn artifact_from_stored_message(
+        &self,
+        message: &StoredMessage,
+    ) -> Result<ProcessedArtifact, BridgeError> {
+        match message.message_type.as_str() {
+            "text" => Ok(ProcessedArtifact::new(
+                message_key(message),
+                ProcessedArtifactKind::Text,
+                message.content_text.clone().unwrap_or_default(),
+            )),
+            "location" => {
+                let latitude = message.location_lat.ok_or_else(|| {
+                    BridgeError::ExternalPayloadInvalid("location_lat missing".to_string())
+                })?;
+                let longitude = message.location_lng.ok_or_else(|| {
+                    BridgeError::ExternalPayloadInvalid("location_lng missing".to_string())
+                })?;
+                let json = self
+                    .external_clients
+                    .reverse_geocode(latitude, longitude)
+                    .await?;
+                let summary = extract_location_summary(&json)?;
+                let location = LocationMessage {
+                    common: common_from_stored_message(message),
+                    latitude,
+                    longitude,
+                    scale: message.location_scale,
+                    label: message.location_label.clone(),
+                };
+                Ok(process_location(&location, &summary, None))
+            }
+            "link" => {
+                let url = message.link_url.as_deref().ok_or_else(|| {
+                    BridgeError::ExternalPayloadInvalid("link_url missing".to_string())
+                })?;
+                let markdown = self.external_clients.read_link(url).await?;
+                let link = LinkMessage {
+                    common: common_from_stored_message(message),
+                    title: message.link_title.clone(),
+                    description: message.link_description.clone(),
+                    url: UrlString::new(url),
+                };
+                Ok(process_link(&link, &markdown, None))
+            }
+            other => Err(BridgeError::MessageUnsupported(format!(
+                "worker does not process {other} yet"
+            ))),
+        }
+    }
 }
 
-fn artifact_from_stored_message(message: &StoredMessage) -> Result<ProcessedArtifact, BridgeError> {
-    match message.message_type.as_str() {
-        "text" => Ok(ProcessedArtifact::new(
-            message_key(message),
-            ProcessedArtifactKind::Text,
-            message.content_text.clone().unwrap_or_default(),
-        )),
-        other => Err(BridgeError::MessageUnsupported(format!(
-            "worker does not process {other} yet"
-        ))),
+fn common_from_stored_message(message: &StoredMessage) -> CommonFields {
+    CommonFields {
+        to_user_name: String::new(),
+        from_user_name: OpenId::new("stored"),
+        create_time: message.create_time.unwrap_or_default(),
+        msg_id: message.wechat_msg_id.clone().map(WechatMsgId::new),
     }
 }
 
@@ -121,30 +219,39 @@ fn message_key(message: &StoredMessage) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::store::MessageInsert;
 
     use super::*;
 
-    async fn store_with_text_job() -> Store {
+    #[derive(Debug, Clone)]
+    struct FakeExternalClients;
+
+    impl ExternalClients for FakeExternalClients {
+        fn reverse_geocode(&self, _latitude: f64, _longitude: f64) -> WorkerFuture<String> {
+            Box::pin(async {
+                Ok(
+                    include_str!("../../tests/fixtures/external/tencent_lbs_success.json")
+                        .to_string(),
+                )
+            })
+        }
+
+        fn read_link(&self, _url: &str) -> WorkerFuture<String> {
+            Box::pin(async {
+                Ok(
+                    include_str!("../../tests/fixtures/external/jina_reader_success.md")
+                        .to_string(),
+                )
+            })
+        }
+    }
+
+    async fn store_with_job(message: MessageInsert) -> Store {
         let store = Store::connect("sqlite::memory:").await.unwrap();
         store.migrate().await.unwrap();
-        let message_id = store
-            .insert_message_idempotent(&MessageInsert {
-                request_id: "req_1".to_string(),
-                wechat_msg_id: Some("msg_text_1".to_string()),
-                to_user_name: "gh_bridge".to_string(),
-                from_openid: "openid-user-1".to_string(),
-                from_openid_hash: "sha256:abc".to_string(),
-                create_time: Some(1780000001),
-                received_at: "2026-05-27T21:30:15+08:00".to_string(),
-                message_type: "text".to_string(),
-                content_text: Some("hello worker".to_string()),
-                authorized: true,
-                status: "queued".to_string(),
-                raw_dir: "data/raw/msg_text_1".to_string(),
-            })
-            .await
-            .unwrap();
+        let message_id = store.insert_message_idempotent(&message).await.unwrap();
         store
             .create_job_once(message_id, "process_message", "2026-05-27T21:30:15+08:00")
             .await
@@ -152,9 +259,60 @@ mod tests {
         store
     }
 
+    fn text_message() -> MessageInsert {
+        MessageInsert {
+            request_id: "req_1".to_string(),
+            wechat_msg_id: Some("msg_text_1".to_string()),
+            to_user_name: "gh_bridge".to_string(),
+            from_openid: "openid-user-1".to_string(),
+            from_openid_hash: "sha256:abc".to_string(),
+            create_time: Some(1780000001),
+            received_at: "2026-05-27T21:30:15+08:00".to_string(),
+            message_type: "text".to_string(),
+            content_text: Some("hello worker".to_string()),
+            location_lat: None,
+            location_lng: None,
+            location_scale: None,
+            location_label: None,
+            link_title: None,
+            link_description: None,
+            link_url: None,
+            authorized: true,
+            status: "queued".to_string(),
+            raw_dir: "data/raw/msg_text_1".to_string(),
+        }
+    }
+
+    fn location_message() -> MessageInsert {
+        MessageInsert {
+            request_id: "req_2".to_string(),
+            wechat_msg_id: Some("msg_location_1".to_string()),
+            message_type: "location".to_string(),
+            location_lat: Some(23.134521),
+            location_lng: Some(113.358803),
+            location_scale: Some(16),
+            location_label: Some("广东省广州市天河区示例路".to_string()),
+            raw_dir: "data/raw/msg_location_1".to_string(),
+            ..text_message()
+        }
+    }
+
+    fn link_message() -> MessageInsert {
+        MessageInsert {
+            request_id: "req_3".to_string(),
+            wechat_msg_id: Some("msg_link_1".to_string()),
+            message_type: "link".to_string(),
+            link_title: Some("示例文章".to_string()),
+            link_description: Some("测试链接".to_string()),
+            link_url: Some("https://example.com/article".to_string()),
+            raw_dir: "data/raw/msg_link_1".to_string(),
+            ..text_message()
+        }
+    }
+
     #[tokio::test]
     async fn worker_processes_text_job_to_source() {
-        let store = store_with_text_job().await;
+        let store = store_with_job(text_message()).await;
         let source_dir = tempfile::tempdir().unwrap();
         let worker = Worker::new(
             store.clone(),
@@ -204,5 +362,55 @@ mod tests {
             .unwrap();
 
         assert_eq!(outcome, WorkOutcome::NoJob);
+    }
+
+    #[tokio::test]
+    async fn worker_processes_location_job_to_source() {
+        let store = store_with_job(location_message()).await;
+        let source_dir = tempfile::tempdir().unwrap();
+        let worker = Worker::with_external_clients(
+            store,
+            SourceWriter::new(source_dir.path()),
+            Arc::new(FakeExternalClients),
+            "worker-1",
+            "0.1.0",
+        );
+
+        let outcome = worker
+            .process_next("2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap();
+
+        let WorkOutcome::Done { source_path, .. } = outcome else {
+            panic!("expected done");
+        };
+        let source = std::fs::read_to_string(source_path).unwrap();
+        assert!(source.contains("Adcode: 440106"));
+        assert!(source.contains("Coordinates: 23.134521, 113.358803"));
+    }
+
+    #[tokio::test]
+    async fn worker_processes_link_job_to_source() {
+        let store = store_with_job(link_message()).await;
+        let source_dir = tempfile::tempdir().unwrap();
+        let worker = Worker::with_external_clients(
+            store,
+            SourceWriter::new(source_dir.path()),
+            Arc::new(FakeExternalClients),
+            "worker-1",
+            "0.1.0",
+        );
+
+        let outcome = worker
+            .process_next("2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap();
+
+        let WorkOutcome::Done { source_path, .. } = outcome else {
+            panic!("expected done");
+        };
+        let source = std::fs::read_to_string(source_path).unwrap();
+        assert!(source.contains("## Reader Content"));
+        assert!(source.contains("这是 Jina Reader 返回的 Markdown 内容"));
     }
 }
