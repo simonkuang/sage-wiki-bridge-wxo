@@ -123,6 +123,44 @@ pub fn parse_plain_message(xml: &str) -> Result<IncomingMessage, BridgeError> {
     raw.try_into()
 }
 
+impl IncomingMessage {
+    pub fn common(&self) -> &CommonFields {
+        match self {
+            Self::Text(message) => &message.common,
+            Self::Image(message) => &message.common,
+            Self::Voice(message) => &message.common,
+            Self::Video(message) | Self::ShortVideo(message) => &message.common,
+            Self::Location(message) => &message.common,
+            Self::Link(message) => &message.common,
+            Self::Unsupported(message) => &message.common,
+        }
+    }
+
+    pub fn msg_type(&self) -> &'static str {
+        match self {
+            Self::Text(_) => "text",
+            Self::Image(_) => "image",
+            Self::Voice(_) => "voice",
+            Self::Video(_) => "video",
+            Self::ShortVideo(_) => "shortvideo",
+            Self::Location(_) => "location",
+            Self::Link(_) => "link",
+            Self::Unsupported(_) => "unsupported",
+        }
+    }
+
+    pub fn is_supported(&self) -> bool {
+        !matches!(self, Self::Unsupported(_))
+    }
+
+    pub fn content_text(&self) -> Option<&str> {
+        match self {
+            Self::Text(message) => Some(&message.content),
+            _ => None,
+        }
+    }
+}
+
 impl TryFrom<RawWechatMessage> for IncomingMessage {
     type Error = BridgeError;
 
