@@ -1,0 +1,10 @@
+<xml>
+  <ToUserName><![CDATA[gh_bridge]]></ToUserName>
+  <FromUserName><![CDATA[openid-user-1]]></FromUserName>
+  <CreateTime>1780000002</CreateTime>
+  <MsgType><![CDATA[image]]></MsgType>
+  <PicUrl><![CDATA[https://mmbiz.qpic.cn/example.jpg]]></PicUrl>
+  <MediaId><![CDATA[media-image-1]]></MediaId>
+  <MsgId>1000000000000000002</MsgId>
+</xml>
+

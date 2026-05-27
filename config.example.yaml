@@ -1,0 +1,26 @@
+server:
+  public_base_url: "https://bridge.example.com"
+  listen_addr: "127.0.0.1:18090"
+  request_body_limit_bytes: 2097152
+
+runtime:
+  tokio_worker_threads: 2
+  job_workers: 1
+  video_workers: 1
+
+storage:
+  sqlite_path: "./data/bridge.sqlite"
+  raw_dir: "./data/raw"
+  processed_dir: "./data/processed"
+  debug_raw_archive: false
+  save_llm_payloads: true
+  hash_openid_in_ui: true
+
+sage_wiki:
+  source_dir: "./tmp/sage-wiki-source"
+  source_timezone: "Asia/Shanghai"
+
+wechat:
+  callback_path: "/wechat/callback"
+  message_mode: "plain"
+

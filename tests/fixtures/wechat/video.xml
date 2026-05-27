@@ -1,0 +1,10 @@
+<xml>
+  <ToUserName><![CDATA[gh_bridge]]></ToUserName>
+  <FromUserName><![CDATA[openid-user-1]]></FromUserName>
+  <CreateTime>1780000004</CreateTime>
+  <MsgType><![CDATA[video]]></MsgType>
+  <MediaId><![CDATA[media-video-1]]></MediaId>
+  <ThumbMediaId><![CDATA[media-thumb-1]]></ThumbMediaId>
+  <MsgId>1000000000000000004</MsgId>
+</xml>
+

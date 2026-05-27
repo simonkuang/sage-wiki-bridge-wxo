@@ -1,0 +1,11 @@
+<xml>
+  <ToUserName><![CDATA[gh_bridge]]></ToUserName>
+  <FromUserName><![CDATA[openid-user-1]]></FromUserName>
+  <CreateTime>1780000007</CreateTime>
+  <MsgType><![CDATA[link]]></MsgType>
+  <Title><![CDATA[示例文章]]></Title>
+  <Description><![CDATA[这是一篇用于测试 Jina Reader 的文章]]></Description>
+  <Url><![CDATA[https://example.com/article]]></Url>
+  <MsgId>1000000000000000007</MsgId>
+</xml>
+

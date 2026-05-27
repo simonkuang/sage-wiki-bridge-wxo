@@ -1,0 +1,11 @@
+<xml>
+  <ToUserName><![CDATA[gh_bridge]]></ToUserName>
+  <FromUserName><![CDATA[openid-user-1]]></FromUserName>
+  <CreateTime>1780000003</CreateTime>
+  <MsgType><![CDATA[voice]]></MsgType>
+  <MediaId><![CDATA[media-voice-1]]></MediaId>
+  <Format><![CDATA[amr]]></Format>
+  <Recognition><![CDATA[这是一段语音识别结果]]></Recognition>
+  <MsgId>1000000000000000003</MsgId>
+</xml>
+

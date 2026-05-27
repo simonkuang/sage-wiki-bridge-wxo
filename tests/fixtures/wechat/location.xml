@@ -1,0 +1,12 @@
+<xml>
+  <ToUserName><![CDATA[gh_bridge]]></ToUserName>
+  <FromUserName><![CDATA[openid-user-1]]></FromUserName>
+  <CreateTime>1780000006</CreateTime>
+  <MsgType><![CDATA[location]]></MsgType>
+  <Location_X>23.134521</Location_X>
+  <Location_Y>113.358803</Location_Y>
+  <Scale>16</Scale>
+  <Label><![CDATA[广东省广州市天河区示例路]]></Label>
+  <MsgId>1000000000000000006</MsgId>
+</xml>
+

@@ -1,0 +1,6 @@
+<xml>
+  <ToUserName><![CDATA[gh_bridge]]></ToUserName>
+  <FromUserName><![CDATA[openid-user-1]]></FromUserName>
+  <CreateTime>1780000009</CreateTime>
+  <MsgType><![CDATA[text]]></MsgType>
+  <Content><![CDATA[broken]]></Content>

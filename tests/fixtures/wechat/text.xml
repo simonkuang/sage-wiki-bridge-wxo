@@ -1,0 +1,9 @@
+<xml>
+  <ToUserName><![CDATA[gh_bridge]]></ToUserName>
+  <FromUserName><![CDATA[openid-user-1]]></FromUserName>
+  <CreateTime>1780000001</CreateTime>
+  <MsgType><![CDATA[text]]></MsgType>
+  <Content><![CDATA[把这条知识存进 sage-wiki]]></Content>
+  <MsgId>1000000000000000001</MsgId>
+</xml>
+
