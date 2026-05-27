@@ -1,0 +1,25 @@
+{
+  "status": 0,
+  "message": "query ok",
+  "result": {
+    "location": {
+      "lat": 23.134521,
+      "lng": 113.358803
+    },
+    "address": "广东省广州市天河区示例路1号",
+    "address_component": {
+      "nation": "中国",
+      "province": "广东省",
+      "city": "广州市",
+      "district": "天河区",
+      "street": "示例路",
+      "street_number": "1号"
+    },
+    "ad_info": {
+      "nation_code": "156",
+      "adcode": "440106",
+      "city_code": "020"
+    }
+  }
+}
+

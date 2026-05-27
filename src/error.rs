@@ -17,6 +17,9 @@ pub enum BridgeError {
     #[error("url not allowed: {0}")]
     UrlNotAllowed(String),
 
+    #[error("external payload invalid: {0}")]
+    ExternalPayloadInvalid(String),
+
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 

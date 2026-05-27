@@ -1,5 +1,6 @@
 pub mod archive;
 pub mod config;
+pub mod enrich;
 pub mod error;
 pub mod preprocess;
 pub mod source;
