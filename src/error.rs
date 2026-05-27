@@ -16,4 +16,10 @@ pub enum BridgeError {
 
     #[error("url not allowed: {0}")]
     UrlNotAllowed(String),
+
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("path escapes configured root: {0}")]
+    PathOutsideRoot(String),
 }

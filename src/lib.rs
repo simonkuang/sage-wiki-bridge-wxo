@@ -1,5 +1,7 @@
+pub mod archive;
 pub mod config;
 pub mod error;
+pub mod preprocess;
 pub mod telemetry;
 pub mod wechat;
 
