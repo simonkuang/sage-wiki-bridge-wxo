@@ -4,6 +4,7 @@ pub mod enrich;
 pub mod error;
 pub mod preprocess;
 pub mod source;
+pub mod store;
 pub mod telemetry;
 pub mod wechat;
 

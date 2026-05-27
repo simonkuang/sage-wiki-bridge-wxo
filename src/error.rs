@@ -20,6 +20,9 @@ pub enum BridgeError {
     #[error("external payload invalid: {0}")]
     ExternalPayloadInvalid(String),
 
+    #[error("database error: {0}")]
+    Database(String),
+
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
