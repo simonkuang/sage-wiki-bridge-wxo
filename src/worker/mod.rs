@@ -1,5 +1,7 @@
 use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 
+pub mod media_processor;
+
 use crate::{
     enrich::tencent_lbs::extract_location_summary,
     error::BridgeError,
