@@ -143,6 +143,11 @@ async fn receive_plain_message(
             received_at: received_at.clone(),
             message_type: message.msg_type().to_string(),
             content_text: message.content_text().map(ToOwned::to_owned),
+            media_id: media_id(&message),
+            thumb_media_id: thumb_media_id(&message),
+            pic_url: pic_url(&message),
+            voice_format: voice_format(&message),
+            voice_recognition: voice_recognition(&message),
             location_lat: location_lat(&message),
             location_lng: location_lng(&message),
             location_scale: location_scale(&message),
@@ -164,6 +169,48 @@ async fn receive_plain_message(
     }
 
     Ok(())
+}
+
+fn media_id(message: &IncomingMessage) -> Option<String> {
+    match message {
+        IncomingMessage::Image(message) => Some(message.media_id.as_str().to_string()),
+        IncomingMessage::Voice(message) => Some(message.media_id.as_str().to_string()),
+        IncomingMessage::Video(message) | IncomingMessage::ShortVideo(message) => {
+            Some(message.media_id.as_str().to_string())
+        }
+        _ => None,
+    }
+}
+
+fn thumb_media_id(message: &IncomingMessage) -> Option<String> {
+    match message {
+        IncomingMessage::Video(message) | IncomingMessage::ShortVideo(message) => message
+            .thumb_media_id
+            .as_ref()
+            .map(|media_id| media_id.as_str().to_string()),
+        _ => None,
+    }
+}
+
+fn pic_url(message: &IncomingMessage) -> Option<String> {
+    match message {
+        IncomingMessage::Image(message) => message.pic_url.clone(),
+        _ => None,
+    }
+}
+
+fn voice_format(message: &IncomingMessage) -> Option<String> {
+    match message {
+        IncomingMessage::Voice(message) => message.format.clone(),
+        _ => None,
+    }
+}
+
+fn voice_recognition(message: &IncomingMessage) -> Option<String> {
+    match message {
+        IncomingMessage::Voice(message) => message.recognition.clone(),
+        _ => None,
+    }
 }
 
 fn location_lat(message: &IncomingMessage) -> Option<f64> {

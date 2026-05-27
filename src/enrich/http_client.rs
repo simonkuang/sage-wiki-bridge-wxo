@@ -40,7 +40,7 @@ impl HttpExternalClients {
 }
 
 impl ExternalClients for HttpExternalClients {
-    fn reverse_geocode(&self, latitude: f64, longitude: f64) -> WorkerFuture<String> {
+    fn reverse_geocode(&self, latitude: f64, longitude: f64) -> WorkerFuture<'static, String> {
         let client = self.client.clone();
         let options = self.tencent_lbs.clone();
         Box::pin(async move {
@@ -67,7 +67,7 @@ impl ExternalClients for HttpExternalClients {
         })
     }
 
-    fn read_link(&self, url: &str) -> WorkerFuture<String> {
+    fn read_link(&self, url: &str) -> WorkerFuture<'static, String> {
         let client = self.client.clone();
         let options = self.jina_reader.clone();
         let api_key = self.jina_api_key.clone();

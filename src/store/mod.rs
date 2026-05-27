@@ -18,6 +18,11 @@ pub struct MessageInsert {
     pub received_at: String,
     pub message_type: String,
     pub content_text: Option<String>,
+    pub media_id: Option<String>,
+    pub thumb_media_id: Option<String>,
+    pub pic_url: Option<String>,
+    pub voice_format: Option<String>,
+    pub voice_recognition: Option<String>,
     pub location_lat: Option<f64>,
     pub location_lng: Option<f64>,
     pub location_scale: Option<i32>,
@@ -48,6 +53,11 @@ pub struct StoredMessage {
     pub received_at: String,
     pub message_type: String,
     pub content_text: Option<String>,
+    pub media_id: Option<String>,
+    pub thumb_media_id: Option<String>,
+    pub pic_url: Option<String>,
+    pub voice_format: Option<String>,
+    pub voice_recognition: Option<String>,
     pub location_lat: Option<f64>,
     pub location_lng: Option<f64>,
     pub location_scale: Option<i32>,
@@ -126,11 +136,12 @@ impl Store {
             INSERT OR IGNORE INTO messages (
               request_id, wechat_msg_id, to_user_name, from_openid, from_openid_hash,
               create_time, received_at, message_type, content_text,
+              media_id, thumb_media_id, pic_url, voice_format, voice_recognition,
               location_lat, location_lng, location_scale, location_label,
               link_title, link_description, link_url,
               authorized, status, raw_dir
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
             "#,
         )
         .bind(&message.request_id)
@@ -142,6 +153,11 @@ impl Store {
         .bind(&message.received_at)
         .bind(&message.message_type)
         .bind(&message.content_text)
+        .bind(&message.media_id)
+        .bind(&message.thumb_media_id)
+        .bind(&message.pic_url)
+        .bind(&message.voice_format)
+        .bind(&message.voice_recognition)
         .bind(message.location_lat)
         .bind(message.location_lng)
         .bind(message.location_scale)
@@ -244,6 +260,7 @@ impl Store {
             r#"
             SELECT id, wechat_msg_id, from_openid_hash, create_time, received_at,
                    message_type, content_text,
+                   media_id, thumb_media_id, pic_url, voice_format, voice_recognition,
                    location_lat, location_lng, location_scale, location_label,
                    link_title, link_description, link_url,
                    raw_dir
@@ -264,6 +281,11 @@ impl Store {
             received_at: row.get("received_at"),
             message_type: row.get("message_type"),
             content_text: row.get("content_text"),
+            media_id: row.get("media_id"),
+            thumb_media_id: row.get("thumb_media_id"),
+            pic_url: row.get("pic_url"),
+            voice_format: row.get("voice_format"),
+            voice_recognition: row.get("voice_recognition"),
             location_lat: row.get("location_lat"),
             location_lng: row.get("location_lng"),
             location_scale: row.get("location_scale"),
@@ -357,6 +379,11 @@ mod tests {
             received_at: "2026-05-27T21:30:15+08:00".to_string(),
             message_type: "text".to_string(),
             content_text: Some("hello".to_string()),
+            media_id: None,
+            thumb_media_id: None,
+            pic_url: None,
+            voice_format: None,
+            voice_recognition: None,
             location_lat: None,
             location_lng: None,
             location_scale: None,

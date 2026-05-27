@@ -14,18 +14,25 @@ use crate::{
     wechat::{OpenId, UrlString, WechatMsgId},
 };
 
-pub type WorkerFuture<T> = Pin<Box<dyn Future<Output = Result<T, BridgeError>> + Send>>;
+pub type WorkerFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, BridgeError>> + Send + 'a>>;
 
 pub trait ExternalClients: Send + Sync {
-    fn reverse_geocode(&self, latitude: f64, longitude: f64) -> WorkerFuture<String>;
-    fn read_link(&self, url: &str) -> WorkerFuture<String>;
+    fn reverse_geocode(&self, latitude: f64, longitude: f64) -> WorkerFuture<'static, String>;
+    fn read_link(&self, url: &str) -> WorkerFuture<'static, String>;
+}
+
+pub trait MediaJobProcessor: Send + Sync {
+    fn process_media_message<'a>(
+        &'a self,
+        message: &'a StoredMessage,
+    ) -> WorkerFuture<'a, ProcessedArtifact>;
 }
 
 #[derive(Debug, Default)]
 pub struct NoopExternalClients;
 
 impl ExternalClients for NoopExternalClients {
-    fn reverse_geocode(&self, _latitude: f64, _longitude: f64) -> WorkerFuture<String> {
+    fn reverse_geocode(&self, _latitude: f64, _longitude: f64) -> WorkerFuture<'static, String> {
         Box::pin(async {
             Err(BridgeError::ExternalPayloadInvalid(
                 "reverse geocode client not configured".to_string(),
@@ -33,11 +40,28 @@ impl ExternalClients for NoopExternalClients {
         })
     }
 
-    fn read_link(&self, _url: &str) -> WorkerFuture<String> {
+    fn read_link(&self, _url: &str) -> WorkerFuture<'static, String> {
         Box::pin(async {
             Err(BridgeError::ExternalPayloadInvalid(
                 "jina reader client not configured".to_string(),
             ))
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NoopMediaJobProcessor;
+
+impl MediaJobProcessor for NoopMediaJobProcessor {
+    fn process_media_message<'a>(
+        &'a self,
+        message: &'a StoredMessage,
+    ) -> WorkerFuture<'a, ProcessedArtifact> {
+        Box::pin(async move {
+            Err(BridgeError::MessageUnsupported(format!(
+                "media processor not configured for {}",
+                message.message_type
+            )))
         })
     }
 }
@@ -47,6 +71,7 @@ pub struct Worker {
     store: Store,
     source_writer: SourceWriter,
     external_clients: Arc<dyn ExternalClients>,
+    media_processor: Arc<dyn MediaJobProcessor>,
     worker_id: String,
     bridge_version: String,
 }
@@ -68,6 +93,7 @@ impl Worker {
             store,
             source_writer,
             external_clients: Arc::new(NoopExternalClients),
+            media_processor: Arc::new(NoopMediaJobProcessor),
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
         }
@@ -84,6 +110,25 @@ impl Worker {
             store,
             source_writer,
             external_clients,
+            media_processor: Arc::new(NoopMediaJobProcessor),
+            worker_id: worker_id.into(),
+            bridge_version: bridge_version.into(),
+        }
+    }
+
+    pub fn with_processors(
+        store: Store,
+        source_writer: SourceWriter,
+        external_clients: Arc<dyn ExternalClients>,
+        media_processor: Arc<dyn MediaJobProcessor>,
+        worker_id: impl Into<String>,
+        bridge_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            store,
+            source_writer,
+            external_clients,
+            media_processor,
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
         }
@@ -117,7 +162,16 @@ impl Worker {
     ) -> Result<PathBuf, BridgeError> {
         let message = self.store.get_message(message_id).await?;
         let artifact = self.artifact_from_stored_message(&message).await?;
-        let metadata = metadata_from_stored_message(&message, &self.bridge_version);
+        let mut metadata = metadata_from_stored_message(&message, &self.bridge_version);
+        if artifact.provider.is_some() {
+            metadata.provider = artifact.provider.clone();
+        }
+        if artifact.model.is_some() {
+            metadata.model = artifact.model.clone();
+        }
+        if artifact.external_service.is_some() {
+            metadata.external_service = artifact.external_service.clone();
+        }
         let result = self.source_writer.write_source(&artifact, &metadata)?;
         self.store
             .mark_message_source_written(
@@ -179,6 +233,9 @@ impl Worker {
                 };
                 Ok(process_link(&link, &markdown, None))
             }
+            "image" | "voice" | "video" | "shortvideo" => {
+                self.media_processor.process_media_message(message).await
+            }
             other => Err(BridgeError::MessageUnsupported(format!(
                 "worker does not process {other} yet"
             ))),
@@ -227,9 +284,15 @@ mod tests {
 
     #[derive(Debug, Clone)]
     struct FakeExternalClients;
+    #[derive(Debug, Clone)]
+    struct FakeMediaProcessor;
 
     impl ExternalClients for FakeExternalClients {
-        fn reverse_geocode(&self, _latitude: f64, _longitude: f64) -> WorkerFuture<String> {
+        fn reverse_geocode(
+            &self,
+            _latitude: f64,
+            _longitude: f64,
+        ) -> WorkerFuture<'static, String> {
             Box::pin(async {
                 Ok(
                     include_str!("../../tests/fixtures/external/tencent_lbs_success.json")
@@ -238,12 +301,42 @@ mod tests {
             })
         }
 
-        fn read_link(&self, _url: &str) -> WorkerFuture<String> {
+        fn read_link(&self, _url: &str) -> WorkerFuture<'static, String> {
             Box::pin(async {
                 Ok(
                     include_str!("../../tests/fixtures/external/jina_reader_success.md")
                         .to_string(),
                 )
+            })
+        }
+    }
+
+    impl MediaJobProcessor for FakeMediaProcessor {
+        fn process_media_message<'a>(
+            &'a self,
+            message: &'a StoredMessage,
+        ) -> WorkerFuture<'a, ProcessedArtifact> {
+            Box::pin(async move {
+                let kind = match message.message_type.as_str() {
+                    "image" => ProcessedArtifactKind::Image,
+                    "voice" => ProcessedArtifactKind::Voice,
+                    "video" => ProcessedArtifactKind::Video,
+                    "shortvideo" => ProcessedArtifactKind::ShortVideo,
+                    other => {
+                        return Err(BridgeError::MessageUnsupported(other.to_string()));
+                    }
+                };
+                let mut artifact = ProcessedArtifact::new(
+                    message_key(message),
+                    kind,
+                    format!(
+                        "processed media {}",
+                        message.media_id.as_deref().unwrap_or("")
+                    ),
+                );
+                artifact.provider = Some("gemini".to_string());
+                artifact.model = Some("gemini-test".to_string());
+                Ok(artifact)
             })
         }
     }
@@ -270,6 +363,11 @@ mod tests {
             received_at: "2026-05-27T21:30:15+08:00".to_string(),
             message_type: "text".to_string(),
             content_text: Some("hello worker".to_string()),
+            media_id: None,
+            thumb_media_id: None,
+            pic_url: None,
+            voice_format: None,
+            voice_recognition: None,
             location_lat: None,
             location_lng: None,
             location_scale: None,
@@ -306,6 +404,19 @@ mod tests {
             link_description: Some("测试链接".to_string()),
             link_url: Some("https://example.com/article".to_string()),
             raw_dir: "data/raw/msg_link_1".to_string(),
+            ..text_message()
+        }
+    }
+
+    fn image_message() -> MessageInsert {
+        MessageInsert {
+            request_id: "req_4".to_string(),
+            wechat_msg_id: Some("msg_image_1".to_string()),
+            message_type: "image".to_string(),
+            content_text: None,
+            media_id: Some("media-image-1".to_string()),
+            pic_url: Some("https://mmbiz.qpic.cn/example.jpg".to_string()),
+            raw_dir: "data/raw/msg_image_1".to_string(),
             ..text_message()
         }
     }
@@ -412,5 +523,32 @@ mod tests {
         let source = std::fs::read_to_string(source_path).unwrap();
         assert!(source.contains("## Reader Content"));
         assert!(source.contains("这是 Jina Reader 返回的 Markdown 内容"));
+    }
+
+    #[tokio::test]
+    async fn worker_processes_media_job_through_media_processor() {
+        let store = store_with_job(image_message()).await;
+        let source_dir = tempfile::tempdir().unwrap();
+        let worker = Worker::with_processors(
+            store,
+            SourceWriter::new(source_dir.path()),
+            Arc::new(FakeExternalClients),
+            Arc::new(FakeMediaProcessor),
+            "worker-1",
+            "0.1.0",
+        );
+
+        let outcome = worker
+            .process_next("2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap();
+
+        let WorkOutcome::Done { source_path, .. } = outcome else {
+            panic!("expected done");
+        };
+        let source = std::fs::read_to_string(source_path).unwrap();
+        assert!(source.contains("processed media media-image-1"));
+        assert!(source.contains("provider: \"gemini\""));
+        assert!(source.contains("model: \"gemini-test\""));
     }
 }
