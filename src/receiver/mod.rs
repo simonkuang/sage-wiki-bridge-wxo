@@ -15,13 +15,20 @@ use crate::{
     archive::RawArchive,
     error::BridgeError,
     store::{MessageInsert, Store},
-    wechat::{IncomingMessage, OpenId, OpenIdHash, parse_plain_message, verify_signature},
+    wechat::{
+        IncomingMessage, OpenId, OpenIdHash,
+        crypto::{decrypt_callback_message, encrypt_reply_message, parse_encrypted_envelope},
+        parse_plain_message, verify_signature,
+    },
 };
 
 #[derive(Debug, Clone)]
 pub struct ReceiverConfig {
     pub wechat_token: String,
     pub callback_path: String,
+    pub encrypted_callback_enabled: bool,
+    pub wechat_app_id: Option<String>,
+    pub wechat_encoding_aes_key: Option<String>,
     pub honeypot_reply_enabled: bool,
     pub honeypot_reply_text: String,
 }
@@ -43,9 +50,11 @@ pub struct VerifyQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct CallbackQuery {
-    signature: String,
+    signature: Option<String>,
+    msg_signature: Option<String>,
     timestamp: String,
     nonce: String,
+    encrypt_type: Option<String>,
 }
 
 pub fn router(state: ReceiverState) -> Router {
@@ -76,7 +85,7 @@ async fn receive_callback(
     Query(query): Query<CallbackQuery>,
     body: String,
 ) -> Response {
-    match receive_plain_message(&state, &query, &body).await {
+    match receive_message(&state, &query, &body).await {
         Ok(Some(reply_xml)) => reply_xml.into_response(),
         Ok(None) => "".into_response(),
         Err(BridgeError::WechatSignatureInvalid) => StatusCode::FORBIDDEN.into_response(),
@@ -87,16 +96,31 @@ async fn receive_callback(
     }
 }
 
+async fn receive_message(
+    state: &ReceiverState,
+    query: &CallbackQuery,
+    body: &str,
+) -> Result<Option<String>, BridgeError> {
+    if state.config.encrypted_callback_enabled && query.encrypt_type.as_deref() == Some("aes") {
+        return receive_encrypted_message(state, query, body).await;
+    }
+    receive_plain_message(state, query, body).await
+}
+
 async fn receive_plain_message(
     state: &ReceiverState,
     query: &CallbackQuery,
     body: &str,
 ) -> Result<Option<String>, BridgeError> {
+    let signature = query
+        .signature
+        .as_deref()
+        .ok_or(BridgeError::WechatSignatureInvalid)?;
     if !verify_signature(
         &state.config.wechat_token,
         &query.timestamp,
         &query.nonce,
-        &query.signature,
+        signature,
     ) {
         return Err(BridgeError::WechatSignatureInvalid);
     }
@@ -113,7 +137,82 @@ async fn receive_plain_message(
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| format!("raw://{request_id}"));
 
-    let message = parse_plain_message(body)?;
+    process_plain_xml(state, &request_id, &raw_dir, body, None).await
+}
+
+async fn receive_encrypted_message(
+    state: &ReceiverState,
+    query: &CallbackQuery,
+    body: &str,
+) -> Result<Option<String>, BridgeError> {
+    let app_id = state
+        .config
+        .wechat_app_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            BridgeError::Config("WECHAT_APP_ID is required for encrypted callback".to_string())
+        })?;
+    let encoding_aes_key = state
+        .config
+        .wechat_encoding_aes_key
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            BridgeError::Config(
+                "WECHAT_ENCODING_AES_KEY is required for encrypted callback".to_string(),
+            )
+        })?;
+    let msg_signature = query
+        .msg_signature
+        .as_deref()
+        .ok_or(BridgeError::WechatSignatureInvalid)?;
+    let request_id = request_id(&query.timestamp, &query.nonce);
+    let raw_record =
+        state
+            .raw_archive
+            .archive_bytes(&request_id, "callback.encrypted.xml", body.as_bytes())?;
+    let raw_dir = raw_record
+        .path
+        .as_ref()
+        .and_then(|path| path.parent())
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| format!("raw://{request_id}"));
+    let envelope = parse_encrypted_envelope(body)?;
+    let decrypted = decrypt_callback_message(
+        &state.config.wechat_token,
+        encoding_aes_key,
+        app_id,
+        &query.timestamp,
+        &query.nonce,
+        msg_signature,
+        &envelope.encrypted_payload,
+    )?;
+
+    let reply =
+        process_plain_xml(state, &request_id, &raw_dir, &decrypted.xml, Some("aes")).await?;
+    if let Some(reply_xml) = reply {
+        return Ok(Some(encrypt_reply_message(
+            &state.config.wechat_token,
+            encoding_aes_key,
+            app_id,
+            &query.timestamp,
+            &query.nonce,
+            &reply_xml,
+        )?));
+    }
+
+    Ok(None)
+}
+
+async fn process_plain_xml(
+    state: &ReceiverState,
+    request_id: &str,
+    raw_dir: &str,
+    plain_xml: &str,
+    encrypt_type: Option<&str>,
+) -> Result<Option<String>, BridgeError> {
+    let message = parse_plain_message(plain_xml)?;
     let common = message.common();
     let openid_hash = OpenIdHash::sha256_for_display(&common.from_user_name).to_string();
     let authorized = state
@@ -134,7 +233,7 @@ async fn receive_plain_message(
     let message_id = state
         .store
         .insert_message_idempotent(&MessageInsert {
-            request_id,
+            request_id: request_id.to_string(),
             wechat_msg_id: common
                 .msg_id
                 .as_ref()
@@ -160,7 +259,7 @@ async fn receive_plain_message(
             link_url: link_url(&message),
             authorized,
             status: status.to_string(),
-            raw_dir,
+            raw_dir: raw_dir.to_string(),
         })
         .await?;
 
@@ -176,6 +275,7 @@ async fn receive_plain_message(
             component = "receiver",
             message_id,
             openid_hash = %OpenIdHash::sha256_for_display(&common.from_user_name),
+            encrypt_type = encrypt_type.unwrap_or("plain"),
             "honeypot reply generated"
         );
         return Ok(Some(passive_text_reply(
@@ -311,7 +411,14 @@ mod tests {
     use crate::{
         archive::RawArchive,
         store::Store,
-        wechat::{OpenId, OpenIdHash, signature::calculate_signature},
+        wechat::{
+            OpenId, OpenIdHash,
+            crypto::{
+                decrypt_callback_message, encrypt_callback_message_for_test,
+                parse_encrypted_envelope,
+            },
+            signature::{calculate_encrypted_signature, calculate_signature},
+        },
     };
 
     use super::*;
@@ -333,6 +440,9 @@ mod tests {
             config: ReceiverConfig {
                 wechat_token: "bridge-token".to_string(),
                 callback_path: "/wechat/callback".to_string(),
+                encrypted_callback_enabled: false,
+                wechat_app_id: None,
+                wechat_encoding_aes_key: None,
                 honeypot_reply_enabled: false,
                 honeypot_reply_text: "Message received.".to_string(),
             },
@@ -344,6 +454,26 @@ mod tests {
     fn signed_path(path: &str, token: &str, timestamp: &str, nonce: &str) -> String {
         let signature = calculate_signature(token, timestamp, nonce);
         format!("{path}?signature={signature}&timestamp={timestamp}&nonce={nonce}")
+    }
+
+    const TEST_AES_KEY: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const TEST_APP_ID: &str = "wx1234567890abcdef";
+
+    fn encrypted_body_and_path(plain_xml: &str) -> (String, String) {
+        let (encrypted_payload, signature) = encrypt_callback_message_for_test(
+            "bridge-token",
+            TEST_AES_KEY,
+            TEST_APP_ID,
+            "1780000000",
+            "nonce1",
+            plain_xml,
+        )
+        .unwrap();
+        let body = format!("<xml><Encrypt><![CDATA[{encrypted_payload}]]></Encrypt></xml>");
+        let uri = format!(
+            "/wechat/callback?encrypt_type=aes&msg_signature={signature}&timestamp=1780000000&nonce=nonce1"
+        );
+        (body, uri)
     }
 
     async fn post_fixture(state: ReceiverState, fixture: &str) -> StatusCode {
@@ -482,6 +612,98 @@ mod tests {
         assert!(reply.contains("<MsgType><![CDATA[text]]></MsgType>"));
         assert!(reply.contains("<Content><![CDATA[收到]]></Content>"));
         assert!(reply.contains("<ToUserName><![CDATA[openid-not-whitelisted]]></ToUserName>"));
+    }
+
+    #[tokio::test]
+    async fn post_encrypted_callback_queues_whitelisted_text() {
+        let mut state = test_state(true).await;
+        state.config.encrypted_callback_enabled = true;
+        state.config.wechat_app_id = Some(TEST_APP_ID.to_string());
+        state.config.wechat_encoding_aes_key = Some(TEST_AES_KEY.to_string());
+        let store = state.store.clone();
+        let app = router(state);
+        let (body, uri) =
+            encrypted_body_and_path(include_str!("../../tests/fixtures/wechat/text.xml"));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let job_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(job_count, 1);
+        let raw_dir: String = sqlx::query_scalar("SELECT raw_dir FROM messages LIMIT 1")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert!(raw_dir.contains("req_1780000000_nonce1"));
+    }
+
+    #[tokio::test]
+    async fn post_encrypted_callback_encrypts_honeypot_reply() {
+        let mut state = test_state(false).await;
+        state.config.encrypted_callback_enabled = true;
+        state.config.wechat_app_id = Some(TEST_APP_ID.to_string());
+        state.config.wechat_encoding_aes_key = Some(TEST_AES_KEY.to_string());
+        state.config.honeypot_reply_enabled = true;
+        state.config.honeypot_reply_text = "收到".to_string();
+        let app = router(state);
+        let plain_xml = include_str!("../../tests/fixtures/wechat/text.xml")
+            .replace("openid-user-1", "openid-not-whitelisted");
+        let (body, uri) = encrypted_body_and_path(&plain_xml);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let encrypted_reply = String::from_utf8(body.to_vec()).unwrap();
+        let envelope = parse_encrypted_envelope(&encrypted_reply).unwrap();
+        let signature = calculate_encrypted_signature(
+            "bridge-token",
+            "1780000000",
+            "nonce1",
+            &envelope.encrypted_payload,
+        );
+        let decrypted = decrypt_callback_message(
+            "bridge-token",
+            TEST_AES_KEY,
+            TEST_APP_ID,
+            "1780000000",
+            "nonce1",
+            &signature,
+            &envelope.encrypted_payload,
+        )
+        .unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            decrypted
+                .xml
+                .contains("<Content><![CDATA[收到]]></Content>")
+        );
+        assert!(
+            decrypted
+                .xml
+                .contains("<ToUserName><![CDATA[openid-not-whitelisted]]></ToUserName>")
+        );
     }
 
     #[tokio::test]

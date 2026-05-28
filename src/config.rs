@@ -51,6 +51,7 @@ pub struct AppConfig {
     pub processed_artifact_dir: PathBuf,
     pub source_dir: PathBuf,
     pub callback_path: String,
+    pub encrypted_callback_enabled: bool,
     pub honeypot_reply_enabled: bool,
     pub honeypot_reply_text: String,
     pub worker_enabled: bool,
@@ -90,6 +91,11 @@ impl AppConfig {
             )),
             source_dir: PathBuf::from(get_string(&lookup, "SAGE_WIKI_SOURCE_DIR", "source")),
             callback_path: get_string(&lookup, "WECHAT_CALLBACK_PATH", "/wechat/callback"),
+            encrypted_callback_enabled: get_bool(
+                &lookup,
+                "WECHAT_ENCRYPTED_CALLBACK_ENABLED",
+                false,
+            )?,
             honeypot_reply_enabled: get_bool(&lookup, "HONEYPOT_REPLY_ENABLED", false)?,
             honeypot_reply_text: get_string(&lookup, "HONEYPOT_REPLY_TEXT", "Message received."),
             worker_enabled: get_bool(&lookup, "WORKER_ENABLED", true)?,
@@ -207,6 +213,7 @@ mod tests {
             PathBuf::from("data/processed")
         );
         assert_eq!(config.callback_path, "/wechat/callback");
+        assert!(!config.encrypted_callback_enabled);
         assert!(!config.honeypot_reply_enabled);
         assert_eq!(config.honeypot_reply_text, "Message received.");
         assert!(config.worker_enabled);
@@ -219,6 +226,7 @@ mod tests {
         let config = config_from_pairs(&[
             ("APP_BIND_ADDR", "0.0.0.0:18080"),
             ("RAW_ARCHIVE_FULL", "false"),
+            ("WECHAT_ENCRYPTED_CALLBACK_ENABLED", "true"),
             ("HONEYPOT_REPLY_ENABLED", "true"),
             ("HONEYPOT_REPLY_TEXT", "收到"),
             ("WORKER_INTERVAL_MS", "250"),
@@ -228,6 +236,7 @@ mod tests {
 
         assert_eq!(config.bind_addr, "0.0.0.0:18080");
         assert!(!config.raw_archive_full);
+        assert!(config.encrypted_callback_enabled);
         assert!(config.honeypot_reply_enabled);
         assert_eq!(config.honeypot_reply_text, "收到");
         assert_eq!(config.worker_interval, Duration::from_millis(250));

@@ -72,6 +72,9 @@ pub async fn run() -> Result<(), error::BridgeError> {
         config: ReceiverConfig {
             wechat_token,
             callback_path: config.callback_path.clone(),
+            encrypted_callback_enabled: config.encrypted_callback_enabled,
+            wechat_app_id: secrets.wechat_app_id.clone(),
+            wechat_encoding_aes_key: secrets.wechat_encoding_aes_key.clone(),
             honeypot_reply_enabled: config.honeypot_reply_enabled,
             honeypot_reply_text: config.honeypot_reply_text.clone(),
         },

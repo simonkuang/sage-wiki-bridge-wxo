@@ -79,6 +79,21 @@ pub fn encrypt_callback_message_for_test(
     Ok((encrypted_payload, signature))
 }
 
+pub fn encrypt_reply_message(
+    token: &str,
+    encoding_aes_key: &str,
+    app_id: &str,
+    timestamp: &str,
+    nonce: &str,
+    xml: &str,
+) -> Result<String, BridgeError> {
+    let (encrypted_payload, signature) =
+        encrypt_callback_message_for_test(token, encoding_aes_key, app_id, timestamp, nonce, xml)?;
+    Ok(format!(
+        "<xml><Encrypt><![CDATA[{encrypted_payload}]]></Encrypt><MsgSignature><![CDATA[{signature}]]></MsgSignature><TimeStamp>{timestamp}</TimeStamp><Nonce><![CDATA[{nonce}]]></Nonce></xml>"
+    ))
+}
+
 fn decode_encoding_aes_key(encoding_aes_key: &str) -> Result<[u8; 32], BridgeError> {
     if encoding_aes_key.len() != 43 {
         return Err(BridgeError::Config(
@@ -180,5 +195,30 @@ mod tests {
                 .unwrap();
 
         assert_eq!(envelope.encrypted_payload, "encrypted-body");
+    }
+
+    #[test]
+    fn encrypted_reply_round_trip_decrypts_xml() {
+        let reply_xml = encrypt_reply_message(TOKEN, AES_KEY, APP_ID, TS, NONCE, XML).unwrap();
+        let envelope = parse_encrypted_envelope(&reply_xml).unwrap();
+        let signature = crate::wechat::signature::calculate_encrypted_signature(
+            TOKEN,
+            TS,
+            NONCE,
+            &envelope.encrypted_payload,
+        );
+
+        let decrypted = decrypt_callback_message(
+            TOKEN,
+            AES_KEY,
+            APP_ID,
+            TS,
+            NONCE,
+            &signature,
+            &envelope.encrypted_payload,
+        )
+        .unwrap();
+
+        assert_eq!(decrypted.xml, XML);
     }
 }
