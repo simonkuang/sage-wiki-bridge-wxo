@@ -58,7 +58,7 @@ CLI flags > --env-file PATH > --use-process-env > built-in defaults
 
 Recommended deployment pattern:
 
-- Put operational settings in CLI flags or the systemd `ExecStart`.
+- Put operational settings in CLI flags. For systemd, put `BRIDGE_*` runtime defaults in `/etc/sage-wiki-bridge.env`; the unit expands them into CLI flags.
 - Put secrets in an explicit env file loaded with `--env-file`.
 - Avoid `--use-process-env` unless the process environment is intentionally managed.
 
@@ -76,7 +76,7 @@ JINA_API_KEY=...
 ADMIN_VIEW_KEY=...
 ```
 
-See [.env.example](.env.example) and [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example) for secrets-only env file examples. Runtime knobs should be passed as CLI flags, not duplicated in dotenv files. The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
+See [.env.example](.env.example) for the local secrets-only env file. For systemd deployments, [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example) contains `BRIDGE_*` runtime defaults plus secrets; the unit expands `BRIDGE_*` into CLI flags. The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
 
 ## Run
 
@@ -105,7 +105,7 @@ curl http://127.0.0.1:8080/readyz
 
 ## Deployment
 
-Systemd templates are in [deploy/systemd](deploy/systemd). The unit keeps non-secret runtime knobs in `ExecStart` and loads secrets explicitly with `--env-file /etc/sage-wiki-bridge.env`.
+Systemd templates are in [deploy/systemd](deploy/systemd). The unit explicitly loads `/etc/sage-wiki-bridge.env`; `BRIDGE_*` variables become CLI flags, and non-`BRIDGE_*` keys are loaded by the binary as secrets via `--env-file`.
 
 Before installing, review:
 

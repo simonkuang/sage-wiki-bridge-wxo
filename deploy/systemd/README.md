@@ -22,6 +22,22 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now sage-wiki-bridge
 ```
 
+Before starting, edit `/etc/sage-wiki-bridge.env`. It contains two groups:
+
+- `BRIDGE_*`: deployment and runtime knobs consumed by systemd and passed to the process as CLI flags.
+- non-`BRIDGE_*`: secrets and environment-bound identifiers loaded by the binary via `--env-file`.
+
+All `BRIDGE_*` variables in the example have defaults. Change at least these before production use:
+
+- `BRIDGE_SAGE_WIKI_SOURCE_DIR`
+- `BRIDGE_WHITELIST_JOIN_COMMAND`
+- `WECHAT_TOKEN`
+- `WECHAT_APP_ID`
+- `WECHAT_APP_SECRET`
+- `WECHAT_ADMIN_OPENIDS`
+- `ADMIN_VIEW_KEY`
+- provider keys such as `GEMINI_API_KEY`, `TENCENT_LBS_KEY`, and `JINA_API_KEY`
+
 After editing `/etc/sage-wiki-bridge.env`:
 
 ```sh
@@ -35,6 +51,6 @@ The binary does not load `.env` implicitly. Config sources must be enabled expli
 /opt/sage-wiki-bridge/bin/sage-wiki-bridge --env-file /etc/sage-wiki-bridge.env
 ```
 
-Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit keeps operational startup settings in `ExecStart` flags and keeps secrets in `/etc/sage-wiki-bridge.env`. Avoid defining the same key in both places unless you intentionally want the CLI flag to override the env file.
+Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit reads `/etc/sage-wiki-bridge.env`, expands `BRIDGE_*` variables into CLI flags, and passes the same file to the binary with `--env-file` for secrets. Avoid defining app config keys that duplicate CLI flags unless you intentionally want the CLI flag to override the env-file value.
 
 The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `SAGE_WIKI_SOURCE_DIR` differs, update `ReadWritePaths` before starting.

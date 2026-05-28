@@ -126,7 +126,8 @@ CLI flags > --env-file PATH > --use-process-env > built-in defaults
 
 Deployment should keep:
 
-- operational knobs in CLI/systemd `ExecStart`
+- operational knobs in CLI flags
+- systemd runtime defaults in `BRIDGE_*` variables loaded from `/etc/sage-wiki-bridge.env`, then expanded by the unit into CLI flags
 - secrets in an explicit env file loaded by `--env-file`
 - process environment disabled unless intentionally used
 

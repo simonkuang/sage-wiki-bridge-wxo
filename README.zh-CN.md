@@ -58,7 +58,7 @@ CLI flags > --env-file PATH > --use-process-env > built-in defaults
 
 推荐部署方式:
 
-- 运行参数放在 CLI flags 或 systemd `ExecStart`。
+- 运行参数放在 CLI flags。systemd 场景下，把带默认值的 `BRIDGE_*` 运行参数放在 `/etc/sage-wiki-bridge.env`，unit 会展开成 CLI flags。
 - secrets 放在通过 `--env-file` 显式加载的文件里。
 - 除非进程环境由你明确管理，否则不要使用 `--use-process-env`。
 
@@ -76,7 +76,7 @@ JINA_API_KEY=...
 ADMIN_VIEW_KEY=...
 ```
 
-参考 [.env.example](.env.example) 和 [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example)，这两个文件只放 secrets 和环境强相关标识。运行参数应通过 CLI flags 传递，不要在 dotenv 中重复配置。完整配置模型见 [技术设计](docs/technical-design.zh-CN.md)。
+本地运行参考 [.env.example](.env.example)，只放 secrets 和环境强相关标识。systemd 部署参考 [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example)，其中 `BRIDGE_*` 是带默认值的运行参数，unit 会把它们展开成 CLI flags；非 `BRIDGE_*` 是传给程序 `--env-file` 的 secrets。完整配置模型见 [技术设计](docs/technical-design.zh-CN.md)。
 
 ## 运行
 
@@ -105,7 +105,7 @@ curl http://127.0.0.1:8080/readyz
 
 ## 部署
 
-systemd 模板在 [deploy/systemd](deploy/systemd)。unit 把非 secret 的运行参数写在 `ExecStart`，并通过 `--env-file /etc/sage-wiki-bridge.env` 显式加载 secrets。
+systemd 模板在 [deploy/systemd](deploy/systemd)。unit 显式加载 `/etc/sage-wiki-bridge.env`；`BRIDGE_*` 变量会转成 CLI flags，非 `BRIDGE_*` key 由程序通过 `--env-file` 作为 secrets 读取。
 
 部署前需要核对:
 

@@ -1380,9 +1380,9 @@ After=network-online.target
 [Service]
 User=bridge
 WorkingDirectory=/srv/sage-wiki-bridge
-EnvironmentFile=/srv/sage-wiki-bridge/.env
+EnvironmentFile=/etc/sage-wiki-bridge.env
 Environment=MALLOC_ARENA_MAX=2
-ExecStart=/srv/sage-wiki-bridge/sage-wiki-bridge
+ExecStart=/bin/sh -c 'exec "$${BRIDGE_BIN_PATH}" --env-file "$${BRIDGE_CONFIG_ENV_FILE}" --bind-addr "$${BRIDGE_BIND_ADDR}" ...'
 Restart=always
 RestartSec=3
 MemoryMax=256M
