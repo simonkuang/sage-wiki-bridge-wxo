@@ -90,71 +90,128 @@ Configuration sources are explicit and ordered:
   CLI flags > --env-file PATH > --use-process-env > built-in defaults.
 
 Source controls:
-  --env-file PATH                  Load dotenv-style config from PATH.
-  --use-process-env                Read process environment variables.
-  --help                           Print this help.
+  --env-file PATH
+      Load dotenv-style config from PATH. Default: not loaded.
+  --use-process-env
+      Read process environment variables. Default: false.
+  --help
+      Print this help.
 
 Core:
   --rust-log VALUE
+      Default: info,sage_wiki_bridge=debug
   --bind-addr VALUE
+      Default: 127.0.0.1:8080
   --database-url VALUE
+      Default: sqlite://data/bridge.sqlite3
   --database-max-connections VALUE
+      Default: 4
   --database-min-connections VALUE
+      Default: 1
   --raw-archive-dir VALUE
+      Default: data/raw
   --raw-archive-full true|false
+      Default: true
   --processed-artifact-dir VALUE
+      Default: data/processed
   --sage-wiki-source-dir VALUE
+      Default: source
   --http-timeout-seconds VALUE
+      Default: 30
   --request-body-limit-bytes VALUE
+      Default: 2097152
   --healthz-path VALUE
+      Default: /healthz
   --readyz-path VALUE
+      Default: /readyz
 
 WeChat:
   --wechat-token VALUE
+      Default: none. Required for callback signature verification.
   --wechat-app-id VALUE
+      Default: none.
   --wechat-app-secret VALUE
+      Default: none.
   --wechat-encoding-aes-key VALUE
+      Default: none. Required only when encrypted callback is enabled.
   --wechat-callback-path VALUE
+      Default: /wechat/callback
   --wechat-encrypted-callback-enabled true|false
+      Default: false
   --wechat-api-base VALUE
+      Default: https://api.weixin.qq.com
   --wechat-oauth-authorize-base VALUE
+      Default: https://open.weixin.qq.com/connect/oauth2/authorize
   --wechat-admin-openids VALUE
+      Default: empty list
   --wechat-token-refresh-skew-seconds VALUE
+      Default: 300
 
 Admin:
   --admin-base-path VALUE
+      Default: /admin
   --admin-view-key VALUE
+      Default: none.
   --whitelist-join-key VALUE
+      Default: none.
   --whitelist-join-redirect-url VALUE
+      Default: empty.
   --admin-default-per-page VALUE
+      Default: 20
   --admin-max-per-page VALUE
+      Default: 100
   --honeypot-reply-enabled true|false
+      Default: false
   --honeypot-reply-text VALUE
+      Default: Message received.
 
 Worker and external services:
   --worker-enabled true|false
+      Default: true
   --worker-id VALUE
+      Default: worker-main
   --bridge-version VALUE
+      Default: {CARGO_PKG_VERSION}
   --worker-interval-ms VALUE
+      Default: 1000
   --worker-processing-timeout-seconds VALUE
+      Default: 900
   --worker-retry-base-seconds VALUE
+      Default: 10
   --worker-retry-max-seconds VALUE
+      Default: 300
   --max-media-bytes VALUE
+      Default: 20971520
   --gemini-api-key VALUE
+      Default: none.
   --gemini-endpoint-base VALUE
+      Default: https://generativelanguage.googleapis.com
   --gemini-model VALUE
+      Default: gemini-2.5-flash
   --gemini-max-inline-bytes VALUE
+      Default: 18874368
   --llm-image-system-prompt VALUE
+      Default: Describe this image for a personal knowledge base.
   --llm-voice-system-prompt VALUE
+      Default: Transcribe and summarize this voice message.
   --llm-video-system-prompt VALUE
+      Default: Summarize this video for a personal knowledge base.
   --openai-api-key VALUE
+      Default: none.
   --anthropic-api-key VALUE
+      Default: none.
   --tencent-lbs-key VALUE
+      Default: none.
   --tencent-lbs-endpoint VALUE
+      Default: https://apis.map.qq.com/ws/geocoder/v1/
   --tencent-lbs-get-poi true|false
+      Default: true
   --tencent-lbs-radius-meters VALUE
+      Default: empty.
   --jina-api-key VALUE
+      Default: none.
   --jina-reader-endpoint VALUE
+      Default: https://r.jina.ai
 "#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,8 +270,8 @@ impl CliConfig {
         Ok(config)
     }
 
-    pub fn help_text() -> &'static str {
-        HELP
+    pub fn help_text() -> String {
+        HELP.replace("{CARGO_PKG_VERSION}", env!("CARGO_PKG_VERSION"))
     }
 }
 
@@ -692,6 +749,22 @@ mod tests {
         let runtime = runtime_config_from_args(["sage-wiki-bridge", "--help"]).unwrap();
 
         assert!(runtime.is_none());
+    }
+
+    #[test]
+    fn help_text_documents_defaults() {
+        let help = CliConfig::help_text();
+
+        assert!(help.contains("--bind-addr VALUE\n      Default: 127.0.0.1:8080"));
+        assert!(
+            help.contains("--database-url VALUE\n      Default: sqlite://data/bridge.sqlite3")
+        );
+        assert!(help.contains("--worker-enabled true|false\n      Default: true"));
+        assert!(help.contains("--wechat-token VALUE\n      Default: none."));
+        assert!(help.contains(&format!(
+            "--bridge-version VALUE\n      Default: {}",
+            env!("CARGO_PKG_VERSION")
+        )));
     }
 
     #[test]
