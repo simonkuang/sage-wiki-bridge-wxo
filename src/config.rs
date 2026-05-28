@@ -56,6 +56,7 @@ pub struct AppConfig {
     pub honeypot_reply_text: String,
     pub worker_enabled: bool,
     pub worker_interval: Duration,
+    pub worker_processing_timeout: Duration,
     pub http_timeout: Duration,
     pub wechat_api_base: String,
     pub wechat_oauth_authorize_base: String,
@@ -100,6 +101,11 @@ impl AppConfig {
             honeypot_reply_text: get_string(&lookup, "HONEYPOT_REPLY_TEXT", "Message received."),
             worker_enabled: get_bool(&lookup, "WORKER_ENABLED", true)?,
             worker_interval: Duration::from_millis(get_u64(&lookup, "WORKER_INTERVAL_MS", 1000)?),
+            worker_processing_timeout: Duration::from_secs(get_u64(
+                &lookup,
+                "WORKER_PROCESSING_TIMEOUT_SECONDS",
+                15 * 60,
+            )?),
             http_timeout: Duration::from_secs(get_u64(&lookup, "HTTP_TIMEOUT_SECONDS", 30)?),
             wechat_api_base: get_string(&lookup, "WECHAT_API_BASE", "https://api.weixin.qq.com"),
             wechat_oauth_authorize_base: get_string(
@@ -218,6 +224,10 @@ mod tests {
         assert_eq!(config.honeypot_reply_text, "Message received.");
         assert!(config.worker_enabled);
         assert_eq!(config.worker_interval, Duration::from_millis(1000));
+        assert_eq!(
+            config.worker_processing_timeout,
+            Duration::from_secs(15 * 60)
+        );
         assert_eq!(config.source_dir, PathBuf::from("source"));
     }
 
@@ -230,6 +240,7 @@ mod tests {
             ("HONEYPOT_REPLY_ENABLED", "true"),
             ("HONEYPOT_REPLY_TEXT", "收到"),
             ("WORKER_INTERVAL_MS", "250"),
+            ("WORKER_PROCESSING_TIMEOUT_SECONDS", "120"),
             ("TENCENT_LBS_RADIUS_METERS", "500"),
         ])
         .unwrap();
@@ -240,6 +251,7 @@ mod tests {
         assert!(config.honeypot_reply_enabled);
         assert_eq!(config.honeypot_reply_text, "收到");
         assert_eq!(config.worker_interval, Duration::from_millis(250));
+        assert_eq!(config.worker_processing_timeout, Duration::from_secs(120));
         assert_eq!(config.tencent_lbs_radius_meters, Some(500));
     }
 

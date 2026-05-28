@@ -174,6 +174,22 @@ impl Worker {
         }
     }
 
+    pub async fn requeue_stale_processing_jobs(
+        &self,
+        now: &str,
+        processing_timeout: std::time::Duration,
+    ) -> Result<u64, BridgeError> {
+        let base =
+            OffsetDateTime::parse(now, &Rfc3339).unwrap_or_else(|_| OffsetDateTime::now_utc());
+        let timeout_seconds = processing_timeout.as_secs().min(i64::MAX as u64) as i64;
+        let locked_before = (base - TimeDuration::seconds(timeout_seconds))
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| now.to_string());
+        self.store
+            .requeue_stale_processing_jobs(&locked_before, now)
+            .await
+    }
+
     async fn process_claimed_job(
         &self,
         job_id: i64,
@@ -573,6 +589,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome, WorkOutcome::NoJob);
+    }
+
+    #[tokio::test]
+    async fn worker_requeues_stale_processing_jobs() {
+        let store = store_with_job(text_message()).await;
+        store
+            .claim_next_job("worker-1", "2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let worker = Worker::new(
+            store.clone(),
+            SourceWriter::new(source_dir.path()),
+            "worker-2",
+            "0.1.0",
+        );
+
+        let count = worker
+            .requeue_stale_processing_jobs(
+                "2026-05-27T21:45:16+08:00",
+                std::time::Duration::from_secs(900),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(count, 1);
+        let outcome = worker
+            .process_next("2026-05-27T21:45:17+08:00")
+            .await
+            .unwrap();
+        assert!(matches!(outcome, WorkOutcome::Done { .. }));
     }
 
     #[tokio::test]

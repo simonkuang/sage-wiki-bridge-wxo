@@ -312,6 +312,34 @@ impl Store {
         }))
     }
 
+    pub async fn requeue_stale_processing_jobs(
+        &self,
+        locked_before: &str,
+        next_run_at: &str,
+    ) -> Result<u64, BridgeError> {
+        let result = sqlx::query(
+            r#"
+            UPDATE jobs
+            SET status = 'pending',
+                next_run_at = ?2,
+                locked_at = NULL,
+                locked_by = NULL,
+                last_error = 'requeued after processing timeout',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE status = 'processing'
+              AND locked_at IS NOT NULL
+              AND locked_at <= ?1
+            "#,
+        )
+        .bind(locked_before)
+        .bind(next_run_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+
+        Ok(result.rows_affected())
+    }
+
     pub async fn get_message(&self, message_id: i64) -> Result<StoredMessage, BridgeError> {
         let row = sqlx::query(
             r#"
@@ -809,5 +837,68 @@ mod tests {
             "2026-05-27T21:30:15+08:00"
         );
         assert_eq!(row.get::<String, _>("last_error"), "permanent failure");
+    }
+
+    #[tokio::test]
+    async fn requeues_stale_processing_jobs() {
+        let store = test_store().await;
+        let message_id = store
+            .insert_message_idempotent(&message("msg_1"))
+            .await
+            .unwrap();
+        let stale_job_id = store
+            .create_job_once(message_id, "process_message", "2026-05-27T21:30:15+08:00")
+            .await
+            .unwrap();
+        store
+            .claim_next_job("worker-1", "2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap();
+        let fresh_message_id = store
+            .insert_message_idempotent(&message("msg_2"))
+            .await
+            .unwrap();
+        let fresh_job_id = store
+            .create_job_once(
+                fresh_message_id,
+                "process_message",
+                "2026-05-27T21:30:15+08:00",
+            )
+            .await
+            .unwrap();
+        store
+            .claim_next_job("worker-2", "2026-05-27T21:39:30+08:00")
+            .await
+            .unwrap();
+
+        let count = store
+            .requeue_stale_processing_jobs("2026-05-27T21:35:00+08:00", "2026-05-27T21:45:00+08:00")
+            .await
+            .unwrap();
+
+        assert_eq!(count, 1);
+        let stale = sqlx::query(
+            "SELECT status, next_run_at, locked_by, last_error FROM jobs WHERE id = ?1",
+        )
+        .bind(stale_job_id)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(stale.get::<String, _>("status"), "pending");
+        assert_eq!(
+            stale.get::<String, _>("next_run_at"),
+            "2026-05-27T21:45:00+08:00"
+        );
+        assert_eq!(stale.get::<Option<String>, _>("locked_by"), None);
+        assert_eq!(
+            stale.get::<String, _>("last_error"),
+            "requeued after processing timeout"
+        );
+        let fresh_status: String = sqlx::query_scalar("SELECT status FROM jobs WHERE id = ?1")
+            .bind(fresh_job_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(fresh_status, "processing");
     }
 }

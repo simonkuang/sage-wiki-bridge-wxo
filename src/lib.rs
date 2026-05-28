@@ -65,8 +65,9 @@ pub async fn run() -> Result<(), error::BridgeError> {
 
     if config.worker_enabled {
         let interval = config.worker_interval;
+        let processing_timeout = config.worker_processing_timeout;
         tokio::spawn(async move {
-            run_worker_loop(worker, interval).await;
+            run_worker_loop(worker, interval, processing_timeout).await;
         });
     }
 
@@ -234,13 +235,33 @@ fn build_oauth_client(
     )?))
 }
 
-async fn run_worker_loop(worker: Worker, interval: std::time::Duration) {
+async fn run_worker_loop(
+    worker: Worker,
+    interval: std::time::Duration,
+    processing_timeout: std::time::Duration,
+) {
     let mut ticker = tokio::time::interval(interval);
     loop {
         ticker.tick().await;
         let now = OffsetDateTime::now_utc()
             .format(&Rfc3339)
             .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+        match worker
+            .requeue_stale_processing_jobs(&now, processing_timeout)
+            .await
+        {
+            Ok(count) if count > 0 => tracing::warn!(
+                component = "worker",
+                requeued_jobs = count,
+                "stale processing jobs requeued"
+            ),
+            Ok(_) => {}
+            Err(err) => tracing::warn!(
+                component = "worker",
+                error = %err,
+                "failed to requeue stale processing jobs"
+            ),
+        }
         match worker.process_next(&now).await {
             Ok(WorkOutcome::Done {
                 job_id,
