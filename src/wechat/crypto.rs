@@ -1,5 +1,8 @@
 use aes::Aes256;
-use base64::{Engine, engine::general_purpose::STANDARD};
+use base64::{
+    Engine, alphabet,
+    engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig, STANDARD},
+};
 use cbc::{
     Decryptor, Encryptor,
     cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::Pkcs7},
@@ -100,12 +103,19 @@ fn decode_encoding_aes_key(encoding_aes_key: &str) -> Result<[u8; 32], BridgeErr
             "WECHAT_ENCODING_AES_KEY must be 43 characters".to_string(),
         ));
     }
-    let decoded = STANDARD
+    let decoded = wechat_aes_key_engine()
         .decode(format!("{encoding_aes_key}="))
         .map_err(|err| BridgeError::Config(format!("invalid WECHAT_ENCODING_AES_KEY: {err}")))?;
     decoded
         .try_into()
         .map_err(|_| BridgeError::Config("WECHAT_ENCODING_AES_KEY must decode to 32 bytes".into()))
+}
+
+fn wechat_aes_key_engine() -> GeneralPurpose {
+    GeneralPurpose::new(
+        &alphabet::STANDARD,
+        GeneralPurposeConfig::new().with_decode_allow_trailing_bits(true),
+    )
 }
 
 fn decrypt_payload(key: &[u8; 32], encrypted_payload: &str) -> Result<Vec<u8>, BridgeError> {
@@ -186,6 +196,15 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, BridgeError::WechatSignatureInvalid));
+    }
+
+    #[test]
+    fn decodes_wechat_aes_key_with_non_canonical_trailing_bits() {
+        let key = format!("{}H", "A".repeat(42));
+
+        let decoded = decode_encoding_aes_key(&key).unwrap();
+
+        assert_eq!(decoded.len(), 32);
     }
 
     #[test]

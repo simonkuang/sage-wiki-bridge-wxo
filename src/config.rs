@@ -21,8 +21,8 @@ pub struct EnvSecrets {
 impl EnvSecrets {
     pub fn from_env() -> Self {
         Self {
-            wechat_app_id: env::var("WECHAT_APP_ID").ok(),
-            wechat_app_secret: env::var("WECHAT_APP_SECRET").ok(),
+            wechat_app_id: first_env(&["WECHAT_APP_ID", "WECHAT_APPID"]),
+            wechat_app_secret: first_env(&["WECHAT_APP_SECRET", "WECHAT_APPSECRET"]),
             wechat_token: env::var("WECHAT_TOKEN").ok(),
             wechat_encoding_aes_key: env::var("WECHAT_ENCODING_AES_KEY").ok(),
             admin_view_key: env::var("ADMIN_VIEW_KEY").ok(),
@@ -42,6 +42,12 @@ impl EnvSecrets {
             .filter(|token| !token.is_empty())
             .ok_or_else(|| BridgeError::Config("WECHAT_TOKEN is required".to_string()))
     }
+}
+
+fn first_env(keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| env::var(key).ok())
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn parse_list_env(value: Option<&str>) -> Vec<String> {
@@ -300,5 +306,10 @@ mod tests {
             vec!["openid-1", "openid-2", "openid-3", "openid-4"]
         );
         assert!(parse_list_env(None).is_empty());
+    }
+
+    #[test]
+    fn first_env_ignores_missing_values() {
+        assert_eq!(first_env(&["SAGE_WIKI_BRIDGE_TEST_MISSING"]), None);
     }
 }
