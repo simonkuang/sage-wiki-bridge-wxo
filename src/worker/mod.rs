@@ -3,6 +3,7 @@ use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc};
 pub mod media_processor;
 
 use crate::{
+    archive::ProcessedArtifactStore,
     enrich::tencent_lbs::extract_location_summary,
     error::BridgeError,
     preprocess::{
@@ -73,6 +74,7 @@ impl MediaJobProcessor for NoopMediaJobProcessor {
 pub struct Worker {
     store: Store,
     source_writer: SourceWriter,
+    processed_artifact_store: Option<ProcessedArtifactStore>,
     external_clients: Arc<dyn ExternalClients>,
     media_processor: Arc<dyn MediaJobProcessor>,
     worker_id: String,
@@ -95,6 +97,7 @@ impl Worker {
         Self {
             store,
             source_writer,
+            processed_artifact_store: None,
             external_clients: Arc::new(NoopExternalClients),
             media_processor: Arc::new(NoopMediaJobProcessor),
             worker_id: worker_id.into(),
@@ -112,6 +115,7 @@ impl Worker {
         Self {
             store,
             source_writer,
+            processed_artifact_store: None,
             external_clients,
             media_processor: Arc::new(NoopMediaJobProcessor),
             worker_id: worker_id.into(),
@@ -130,11 +134,20 @@ impl Worker {
         Self {
             store,
             source_writer,
+            processed_artifact_store: None,
             external_clients,
             media_processor,
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
         }
+    }
+
+    pub fn with_processed_artifact_store(
+        mut self,
+        processed_artifact_store: ProcessedArtifactStore,
+    ) -> Self {
+        self.processed_artifact_store = Some(processed_artifact_store);
+        self
     }
 
     pub async fn process_next(&self, now: &str) -> Result<WorkOutcome, BridgeError> {
@@ -168,6 +181,7 @@ impl Worker {
     ) -> Result<PathBuf, BridgeError> {
         let message = self.store.get_message(message_id).await?;
         let artifact = self.artifact_from_stored_message(&message).await?;
+        self.save_processed_artifact(&artifact)?;
         let mut metadata = metadata_from_stored_message(&message, &self.bridge_version);
         if artifact.provider.is_some() {
             metadata.provider = artifact.provider.clone();
@@ -194,6 +208,26 @@ impl Worker {
             "message processed"
         );
         Ok(result.path)
+    }
+
+    fn save_processed_artifact(&self, artifact: &ProcessedArtifact) -> Result<(), BridgeError> {
+        let Some(store) = &self.processed_artifact_store else {
+            return Ok(());
+        };
+        let record = store.save_artifact(
+            &artifact.message_key,
+            "processed.md",
+            artifact.markdown_body.as_bytes(),
+        )?;
+        if let Some(path) = record.path {
+            tracing::debug!(
+                component = "worker",
+                message_key = %artifact.message_key,
+                processed_artifact_path = %path.display(),
+                "processed artifact saved"
+            );
+        }
+        Ok(())
     }
     async fn artifact_from_stored_message(
         &self,
@@ -446,12 +480,14 @@ mod tests {
     async fn worker_processes_text_job_to_source() {
         let store = store_with_job(text_message()).await;
         let source_dir = tempfile::tempdir().unwrap();
+        let processed_dir = tempfile::tempdir().unwrap();
         let worker = Worker::new(
             store.clone(),
             SourceWriter::new(source_dir.path()),
             "worker-1",
             "0.1.0",
-        );
+        )
+        .with_processed_artifact_store(ProcessedArtifactStore::new(processed_dir.path()));
 
         let outcome = worker
             .process_next("2026-05-27T21:30:16+08:00")
@@ -463,6 +499,10 @@ mod tests {
         };
         let source = std::fs::read_to_string(source_path).unwrap();
         assert!(source.contains("hello worker"));
+        let processed =
+            std::fs::read_to_string(processed_dir.path().join("msg_text_1").join("processed.md"))
+                .unwrap();
+        assert_eq!(processed, "hello worker");
 
         let message_status: String = sqlx::query_scalar("SELECT status FROM messages LIMIT 1")
             .fetch_one(store.pool())

@@ -48,6 +48,7 @@ pub struct AppConfig {
     pub database_url: String,
     pub raw_archive_dir: PathBuf,
     pub raw_archive_full: bool,
+    pub processed_artifact_dir: PathBuf,
     pub source_dir: PathBuf,
     pub callback_path: String,
     pub honeypot_reply_enabled: bool,
@@ -80,6 +81,11 @@ impl AppConfig {
             database_url: get_string(&lookup, "DATABASE_URL", "sqlite://data/bridge.sqlite3"),
             raw_archive_dir: PathBuf::from(get_string(&lookup, "RAW_ARCHIVE_DIR", "data/raw")),
             raw_archive_full: get_bool(&lookup, "RAW_ARCHIVE_FULL", true)?,
+            processed_artifact_dir: PathBuf::from(get_string(
+                &lookup,
+                "PROCESSED_ARTIFACT_DIR",
+                "data/processed",
+            )),
             source_dir: PathBuf::from(get_string(&lookup, "SAGE_WIKI_SOURCE_DIR", "source")),
             callback_path: get_string(&lookup, "WECHAT_CALLBACK_PATH", "/wechat/callback"),
             honeypot_reply_enabled: get_bool(&lookup, "HONEYPOT_REPLY_ENABLED", false)?,
@@ -176,6 +182,10 @@ mod tests {
 
         assert_eq!(config.bind_addr, "127.0.0.1:8080");
         assert_eq!(config.database_url, "sqlite://data/bridge.sqlite3");
+        assert_eq!(
+            config.processed_artifact_dir,
+            PathBuf::from("data/processed")
+        );
         assert_eq!(config.callback_path, "/wechat/callback");
         assert!(!config.honeypot_reply_enabled);
         assert_eq!(config.honeypot_reply_text, "Message received.");

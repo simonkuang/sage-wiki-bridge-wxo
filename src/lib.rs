@@ -19,7 +19,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
     admin::AdminState,
-    archive::RawArchive,
+    archive::{ProcessedArtifactStore, RawArchive},
     config::{AppConfig, EnvSecrets},
     enrich::{
         http_client::HttpExternalClients, jina_reader::JinaReaderOptions,
@@ -57,7 +57,8 @@ pub async fn run() -> Result<(), error::BridgeError> {
         media_processor,
         "worker-main",
         env!("CARGO_PKG_VERSION"),
-    );
+    )
+    .with_processed_artifact_store(ProcessedArtifactStore::new(&config.processed_artifact_dir));
 
     if config.worker_enabled {
         let interval = config.worker_interval;
