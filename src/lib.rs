@@ -31,6 +31,7 @@ use crate::{
     receiver::{ReceiverConfig, ReceiverState},
     source::SourceWriter,
     store::Store,
+    wechat::oauth::{WechatOAuthClient, WechatOAuthConfig},
     worker::{
         ExternalClients, MediaJobProcessor, NoopExternalClients, NoopMediaJobProcessor,
         WorkOutcome, Worker, media_processor::GeminiMediaJobProcessor,
@@ -81,6 +82,8 @@ pub async fn run() -> Result<(), error::BridgeError> {
         store,
         view_key: secrets.admin_view_key.clone(),
         whitelist_join_key: secrets.whitelist_join_key.clone(),
+        whitelist_join_redirect_url: config.whitelist_join_redirect_url.clone(),
+        oauth_client: build_oauth_client(&config, &secrets)?,
     }));
     let listener = tokio::net::TcpListener::bind(&config.bind_addr)
         .await
@@ -193,6 +196,36 @@ fn build_media_processor(
         Arc::new(gemini_client),
         &config.raw_archive_dir,
     )))
+}
+
+fn build_oauth_client(
+    config: &AppConfig,
+    secrets: &EnvSecrets,
+) -> Result<Option<WechatOAuthClient>, BridgeError> {
+    let Some(app_id) = secrets
+        .wechat_app_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(app_secret) = secrets
+        .wechat_app_secret
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(WechatOAuthClient::new(
+        WechatOAuthConfig {
+            app_id: app_id.to_string(),
+            app_secret: app_secret.to_string(),
+            api_base: config.wechat_api_base.clone(),
+            authorize_base: config.wechat_oauth_authorize_base.clone(),
+        },
+        config.http_timeout,
+    )?))
 }
 
 async fn run_worker_loop(worker: Worker, interval: std::time::Duration) {

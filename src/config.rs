@@ -57,7 +57,9 @@ pub struct AppConfig {
     pub worker_interval: Duration,
     pub http_timeout: Duration,
     pub wechat_api_base: String,
+    pub wechat_oauth_authorize_base: String,
     pub max_media_bytes: u64,
+    pub whitelist_join_redirect_url: Option<String>,
     pub gemini_endpoint_base: String,
     pub gemini_model: String,
     pub gemini_max_inline_bytes: u64,
@@ -94,7 +96,16 @@ impl AppConfig {
             worker_interval: Duration::from_millis(get_u64(&lookup, "WORKER_INTERVAL_MS", 1000)?),
             http_timeout: Duration::from_secs(get_u64(&lookup, "HTTP_TIMEOUT_SECONDS", 30)?),
             wechat_api_base: get_string(&lookup, "WECHAT_API_BASE", "https://api.weixin.qq.com"),
+            wechat_oauth_authorize_base: get_string(
+                &lookup,
+                "WECHAT_OAUTH_AUTHORIZE_BASE",
+                "https://open.weixin.qq.com/connect/oauth2/authorize",
+            ),
             max_media_bytes: get_u64(&lookup, "MAX_MEDIA_BYTES", 20 * 1024 * 1024)?,
+            whitelist_join_redirect_url: get_optional_string(
+                &lookup,
+                "WHITELIST_JOIN_REDIRECT_URL",
+            ),
             gemini_endpoint_base: get_string(
                 &lookup,
                 "GEMINI_ENDPOINT_BASE",
@@ -160,6 +171,15 @@ where
         .parse::<u32>()
         .map(Some)
         .map_err(|_| BridgeError::Config(format!("{key} must be a positive integer")))
+}
+
+fn get_optional_string<F>(lookup: &F, key: &str) -> Option<String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    lookup(key)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 #[cfg(test)]

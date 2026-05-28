@@ -12,7 +12,7 @@ use serde::Deserialize;
 use crate::{
     error::BridgeError,
     store::{MessageDetail, MessageListQuery, Store},
-    wechat::{OpenId, OpenIdHash},
+    wechat::{OpenId, OpenIdHash, oauth::WechatOAuthClient},
 };
 
 #[derive(Debug, Clone)]
@@ -20,6 +20,8 @@ pub struct AdminState {
     pub store: Store,
     pub view_key: Option<String>,
     pub whitelist_join_key: Option<String>,
+    pub whitelist_join_redirect_url: Option<String>,
+    pub oauth_client: Option<WechatOAuthClient>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +42,7 @@ struct DetailQuery {
 struct JoinQuery {
     key: Option<String>,
     openid: Option<String>,
+    code: Option<String>,
 }
 
 pub fn router(state: AdminState) -> Router {
@@ -109,8 +112,31 @@ async fn join_whitelist(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let Some(openid) = query.openid.as_deref().filter(|value| !value.is_empty()) else {
-        return Html(render_join_form(&query.key.unwrap_or_default())).into_response();
+    let openid = if let Some(openid) = query.openid.as_deref().filter(|value| !value.is_empty()) {
+        openid.to_string()
+    } else if let Some(code) = query.code.as_deref().filter(|value| !value.is_empty()) {
+        let Some(oauth_client) = &state.oauth_client else {
+            return error_response(BridgeError::Config(
+                "WeChat OAuth client not configured".to_string(),
+            ));
+        };
+        match oauth_client.exchange_code(code).await {
+            Ok(subject) => subject.openid,
+            Err(err) => return error_response(err),
+        }
+    } else {
+        let auth_url = match (&state.oauth_client, &state.whitelist_join_redirect_url) {
+            (Some(oauth_client), Some(redirect_url)) => oauth_client
+                .authorize_url(redirect_url, "whitelist_join")
+                .ok()
+                .map(|url| url.to_string()),
+            _ => None,
+        };
+        return Html(render_join_form(
+            &query.key.unwrap_or_default(),
+            auth_url.as_deref(),
+        ))
+        .into_response();
     };
     let openid = OpenId::new(openid);
     let openid_hash = OpenIdHash::sha256_for_display(&openid).to_string();
@@ -256,12 +282,20 @@ fn render_detail_page(key: &str, detail: &MessageDetail) -> String {
     )
 }
 
-fn render_join_form(key: &str) -> String {
+fn render_join_form(key: &str, auth_url: Option<&str>) -> String {
+    let oauth_link = auth_url
+        .map(|url| {
+            format!(
+                "<p><a href=\"{}\">Authorize with WeChat OAuth</a></p>",
+                escape_attr(url)
+            )
+        })
+        .unwrap_or_default();
     format!(
         "<!doctype html><meta charset=\"utf-8\"><title>Join Whitelist</title>{style}\
          <h1>Join Whitelist</h1><form method=\"get\">\
          <input type=\"hidden\" name=\"key\" value=\"{}\">\
-         <input name=\"openid\" placeholder=\"openid\"><button type=\"submit\">Join</button></form>",
+         <input name=\"openid\" placeholder=\"openid\"><button type=\"submit\">Join</button></form>{oauth_link}",
         escape_attr(key),
         style = STYLE
     )
@@ -300,12 +334,20 @@ dt{font-weight:700}
 #[cfg(test)]
 mod tests {
     use axum::{
+        Json, Router as AxumRouter,
         body::{Body, to_bytes},
         http::{Request, StatusCode},
+        response::IntoResponse,
+        routing::get,
     };
+    use serde_json::json;
+    use tokio::net::TcpListener;
     use tower::ServiceExt;
 
-    use crate::store::{MessageInsert, Store};
+    use crate::{
+        store::{MessageInsert, Store},
+        wechat::oauth::{WechatOAuthClient, WechatOAuthConfig},
+    };
 
     use super::*;
 
@@ -344,13 +386,37 @@ mod tests {
         store
     }
 
-    #[tokio::test]
-    async fn admin_list_requires_key() {
-        let app = router(AdminState {
-            store: test_store().await,
+    fn admin_state(store: Store) -> AdminState {
+        AdminState {
+            store,
             view_key: Some("view-key".to_string()),
             whitelist_join_key: Some("join-key".to_string()),
+            whitelist_join_redirect_url: None,
+            oauth_client: None,
+        }
+    }
+
+    async fn spawn_mock_oauth() -> String {
+        async fn handler() -> impl IntoResponse {
+            Json(json!({
+                "access_token": "oauth-token",
+                "expires_in": 7200,
+                "openid": "openid-from-code",
+                "scope": "snsapi_base"
+            }))
+        }
+        let app = AxumRouter::new().route("/{*path}", get(handler));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
         });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn admin_list_requires_key() {
+        let app = router(admin_state(test_store().await));
 
         let response = app
             .oneshot(
@@ -367,11 +433,7 @@ mod tests {
 
     #[tokio::test]
     async fn admin_list_renders_messages() {
-        let app = router(AdminState {
-            store: test_store().await,
-            view_key: Some("view-key".to_string()),
-            whitelist_join_key: Some("join-key".to_string()),
-        });
+        let app = router(admin_state(test_store().await));
 
         let response = app
             .oneshot(
@@ -394,11 +456,7 @@ mod tests {
     #[tokio::test]
     async fn whitelist_join_stub_adds_openid() {
         let store = test_store().await;
-        let app = router(AdminState {
-            store: store.clone(),
-            view_key: Some("view-key".to_string()),
-            whitelist_join_key: Some("join-key".to_string()),
-        });
+        let app = router(admin_state(store.clone()));
 
         let response = app
             .oneshot(
@@ -412,5 +470,50 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert!(store.is_openid_whitelisted("openid-new").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn whitelist_join_exchanges_oauth_code() {
+        let store = test_store().await;
+        let api_base = spawn_mock_oauth().await;
+        let app = router(AdminState {
+            store: store.clone(),
+            view_key: Some("view-key".to_string()),
+            whitelist_join_key: Some("join-key".to_string()),
+            whitelist_join_redirect_url: Some(
+                "https://bridge.example.com/admin/whitelist/join?key=join-key".to_string(),
+            ),
+            oauth_client: Some(
+                WechatOAuthClient::new(
+                    WechatOAuthConfig {
+                        app_id: "wx-app-id".to_string(),
+                        app_secret: "secret".to_string(),
+                        api_base,
+                        authorize_base: "https://open.weixin.qq.com/connect/oauth2/authorize"
+                            .to_string(),
+                    },
+                    std::time::Duration::from_secs(5),
+                )
+                .unwrap(),
+            ),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/whitelist/join?key=join-key&code=oauth-code")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            store
+                .is_openid_whitelisted("openid-from-code")
+                .await
+                .unwrap()
+        );
     }
 }
