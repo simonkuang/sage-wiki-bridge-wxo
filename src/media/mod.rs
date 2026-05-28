@@ -2,13 +2,15 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    time::Duration,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
 use reqwest::Client;
 use serde::Deserialize;
 
 use sha2::{Digest, Sha256};
+use tokio::sync::Mutex;
 
 use crate::{error::BridgeError, wechat::MediaId};
 
@@ -38,6 +40,53 @@ pub struct WechatMediaClient {
     client: Client,
     config: WechatApiConfig,
     max_media_bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct WechatAccessTokenCache {
+    client: WechatMediaClient,
+    cached: Arc<Mutex<Option<CachedAccessToken>>>,
+    refresh_skew: Duration,
+}
+
+#[derive(Debug, Clone)]
+struct CachedAccessToken {
+    token: String,
+    expires_at: Instant,
+}
+
+impl WechatAccessTokenCache {
+    pub fn new(client: WechatMediaClient, refresh_skew: Duration) -> Self {
+        Self {
+            client,
+            cached: Arc::new(Mutex::new(None)),
+            refresh_skew,
+        }
+    }
+
+    pub async fn get_token(&self) -> Result<String, BridgeError> {
+        if let Some(token) = self.valid_cached_token().await {
+            return Ok(token);
+        }
+
+        let fetched = self.client.fetch_access_token().await?;
+        let ttl = Duration::from_secs(fetched.expires_in).saturating_sub(self.refresh_skew);
+        let cached = CachedAccessToken {
+            token: fetched.token,
+            expires_at: Instant::now() + ttl,
+        };
+        let token = cached.token.clone();
+        *self.cached.lock().await = Some(cached);
+        Ok(token)
+    }
+
+    async fn valid_cached_token(&self) -> Option<String> {
+        let cached = self.cached.lock().await;
+        cached
+            .as_ref()
+            .filter(|token| Instant::now() < token.expires_at)
+            .map(|token| token.token.clone())
+    }
 }
 
 impl WechatMediaClient {
@@ -162,6 +211,11 @@ struct TokenResponse {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use axum::{
         Router,
         extract::Request,
@@ -196,6 +250,32 @@ mod tests {
         format!("http://{addr}")
     }
 
+    async fn spawn_counted_token_wechat() -> (String, Arc<AtomicUsize>) {
+        let token_calls = Arc::new(AtomicUsize::new(0));
+        let token_calls_for_handler = token_calls.clone();
+        async fn handler(request: Request, token_calls: Arc<AtomicUsize>) -> Response {
+            let path = request.uri().path();
+            if path == "/cgi-bin/token" {
+                let count = token_calls.fetch_add(1, Ordering::SeqCst) + 1;
+                format!(r#"{{"access_token":"access-token-{count}","expires_in":7200}}"#)
+                    .into_response()
+            } else {
+                b"fake-media-bytes".as_slice().into_response()
+            }
+        }
+
+        let app = Router::new().route(
+            "/{*path}",
+            get(move |request| handler(request, token_calls_for_handler.clone())),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{addr}"), token_calls)
+    }
+
     #[tokio::test]
     async fn fetches_access_token_from_mock_wechat() {
         let api_base = spawn_mock_wechat().await;
@@ -214,6 +294,29 @@ mod tests {
 
         assert_eq!(token.token, "access-token-1");
         assert_eq!(token.expires_in, 7200);
+    }
+
+    #[tokio::test]
+    async fn access_token_cache_reuses_valid_token() {
+        let (api_base, token_calls) = spawn_counted_token_wechat().await;
+        let client = WechatMediaClient::new(
+            WechatApiConfig {
+                api_base,
+                app_id: "app-id".to_string(),
+                app_secret: "secret".to_string(),
+            },
+            Duration::from_secs(5),
+            1024,
+        )
+        .unwrap();
+        let cache = WechatAccessTokenCache::new(client, Duration::from_secs(300));
+
+        let first = cache.get_token().await.unwrap();
+        let second = cache.get_token().await.unwrap();
+
+        assert_eq!(first, "access-token-1");
+        assert_eq!(second, "access-token-1");
+        assert_eq!(token_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

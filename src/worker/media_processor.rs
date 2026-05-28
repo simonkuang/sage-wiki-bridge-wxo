@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use crate::{
     error::BridgeError,
     llm::{LlmMediaRequest, LlmProvider, MediaKind},
-    media::WechatMediaClient,
+    media::{WechatAccessTokenCache, WechatMediaClient},
     preprocess::{
         artifact::{ProcessedArtifact, ProcessedArtifactKind},
         media::{ModelPreprocessOutput, process_model_output},
@@ -16,6 +16,7 @@ use crate::{
 #[derive(Clone)]
 pub struct GeminiMediaJobProcessor {
     media_client: WechatMediaClient,
+    token_cache: WechatAccessTokenCache,
     llm_provider: Arc<dyn LlmProvider>,
     raw_root: PathBuf,
     image_prompt: String,
@@ -29,8 +30,11 @@ impl GeminiMediaJobProcessor {
         llm_provider: Arc<dyn LlmProvider>,
         raw_root: impl Into<PathBuf>,
     ) -> Self {
+        let token_cache =
+            WechatAccessTokenCache::new(media_client.clone(), std::time::Duration::from_secs(300));
         Self {
             media_client,
+            token_cache,
             llm_provider,
             raw_root: raw_root.into(),
             image_prompt: "Describe this image for a personal knowledge base.".to_string(),
@@ -57,10 +61,10 @@ impl MediaJobProcessor for GeminiMediaJobProcessor {
                 .raw_root
                 .join(message_key(message))
                 .join(format!("media.original{}", extension_for_mime(mime_type)));
-            let access_token = self.media_client.fetch_access_token().await?;
+            let access_token = self.token_cache.get_token().await?;
             let downloaded = self
                 .media_client
-                .download_media(&access_token.token, &MediaId::new(media_id), &target_path)
+                .download_media(&access_token, &MediaId::new(media_id), &target_path)
                 .await?;
             let output = self
                 .llm_provider
