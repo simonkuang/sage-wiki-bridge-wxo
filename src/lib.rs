@@ -50,6 +50,7 @@ pub async fn run() -> Result<(), error::BridgeError> {
     ensure_sqlite_parent(&config.database_url)?;
     let store = Store::connect(&config.database_url).await?;
     store.migrate().await?;
+    seed_configured_admin_openids(&store, &secrets).await?;
 
     let external_clients = build_external_clients(&config, &secrets)?;
     let media_processor = build_media_processor(&config, &secrets)?;
@@ -108,6 +109,25 @@ pub async fn run() -> Result<(), error::BridgeError> {
     axum::serve(listener, app)
         .await
         .map_err(|err| BridgeError::Config(format!("server failed: {err}")))
+}
+
+async fn seed_configured_admin_openids(
+    store: &Store,
+    secrets: &EnvSecrets,
+) -> Result<(), BridgeError> {
+    for openid in &secrets.admin_openids {
+        let openid = wechat::OpenId::new(openid);
+        let openid_hash = wechat::OpenIdHash::sha256_for_display(&openid).to_string();
+        store
+            .upsert_whitelist(openid.as_str(), &openid_hash, "env-admin-openids")
+            .await?;
+        tracing::info!(
+            component = "main",
+            openid_hash = %openid_hash,
+            "configured admin openid whitelisted"
+        );
+    }
+    Ok(())
 }
 
 fn build_external_clients(

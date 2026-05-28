@@ -15,6 +15,7 @@ pub struct EnvSecrets {
     pub anthropic_api_key: Option<String>,
     pub tencent_lbs_key: Option<String>,
     pub jina_api_key: Option<String>,
+    pub admin_openids: Vec<String>,
 }
 
 impl EnvSecrets {
@@ -31,6 +32,7 @@ impl EnvSecrets {
             anthropic_api_key: env::var("ANTHROPIC_API_KEY").ok(),
             tencent_lbs_key: env::var("TENCENT_LBS_KEY").ok(),
             jina_api_key: env::var("JINA_API_KEY").ok(),
+            admin_openids: parse_list_env(env::var("WECHAT_ADMIN_OPENIDS").ok().as_deref()),
         }
     }
 
@@ -40,6 +42,15 @@ impl EnvSecrets {
             .filter(|token| !token.is_empty())
             .ok_or_else(|| BridgeError::Config("WECHAT_TOKEN is required".to_string()))
     }
+}
+
+fn parse_list_env(value: Option<&str>) -> Vec<String> {
+    value
+        .unwrap_or("")
+        .split([',', '\n', ';'])
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,5 +291,14 @@ mod tests {
         let err = config_from_pairs(&[("WORKER_ENABLED", "maybe")]).unwrap_err();
 
         assert!(matches!(err, BridgeError::Config(_)));
+    }
+
+    #[test]
+    fn parses_list_env_values() {
+        assert_eq!(
+            parse_list_env(Some("openid-1, openid-2\nopenid-3;openid-4")),
+            vec!["openid-1", "openid-2", "openid-3", "openid-4"]
+        );
+        assert!(parse_list_env(None).is_empty());
     }
 }
