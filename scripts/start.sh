@@ -32,6 +32,23 @@ HEALTHZ_PATH="${HEALTHZ_PATH:-/healthz}"
 READYZ_PATH="${READYZ_PATH:-/readyz}"
 RUST_LOG="${RUST_LOG:-info,sage_wiki_bridge=debug}"
 ADMIN_BASE_PATH="${ADMIN_BASE_PATH:-/admin}"
+WECHAT_API_BASE="${WECHAT_API_BASE:-https://api.weixin.qq.com}"
+WECHAT_OAUTH_AUTHORIZE_BASE="${WECHAT_OAUTH_AUTHORIZE_BASE:-https://open.weixin.qq.com/connect/oauth2/authorize}"
+WECHAT_TOKEN_REFRESH_SKEW_SECONDS="${WECHAT_TOKEN_REFRESH_SKEW_SECONDS:-300}"
+WHITELIST_JOIN_REDIRECT_URL="${WHITELIST_JOIN_REDIRECT_URL:-}"
+ADMIN_DEFAULT_PER_PAGE="${ADMIN_DEFAULT_PER_PAGE:-20}"
+ADMIN_MAX_PER_PAGE="${ADMIN_MAX_PER_PAGE:-100}"
+MAX_MEDIA_BYTES="${MAX_MEDIA_BYTES:-20971520}"
+GEMINI_ENDPOINT_BASE="${GEMINI_ENDPOINT_BASE:-https://generativelanguage.googleapis.com}"
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
+GEMINI_MAX_INLINE_BYTES="${GEMINI_MAX_INLINE_BYTES:-18874368}"
+LLM_IMAGE_SYSTEM_PROMPT="${LLM_IMAGE_SYSTEM_PROMPT:-Describe this image for a personal knowledge base.}"
+LLM_VOICE_SYSTEM_PROMPT="${LLM_VOICE_SYSTEM_PROMPT:-Transcribe and summarize this voice message.}"
+LLM_VIDEO_SYSTEM_PROMPT="${LLM_VIDEO_SYSTEM_PROMPT:-Summarize this video for a personal knowledge base.}"
+TENCENT_LBS_ENDPOINT="${TENCENT_LBS_ENDPOINT:-https://apis.map.qq.com/ws/geocoder/v1/}"
+TENCENT_LBS_GET_POI="${TENCENT_LBS_GET_POI:-true}"
+TENCENT_LBS_RADIUS_METERS="${TENCENT_LBS_RADIUS_METERS:-500}"
+JINA_READER_ENDPOINT="${JINA_READER_ENDPOINT:-https://r.jina.ai}"
 
 if [ -f "$PID_FILE" ]; then
   old_pid="$(cat "$PID_FILE")"
@@ -74,7 +91,24 @@ set -- "$@" \
   --request-body-limit-bytes "$REQUEST_BODY_LIMIT_BYTES" \
   --healthz-path "$HEALTHZ_PATH" \
   --readyz-path "$READYZ_PATH" \
+  --wechat-api-base "$WECHAT_API_BASE" \
+  --wechat-oauth-authorize-base "$WECHAT_OAUTH_AUTHORIZE_BASE" \
+  --wechat-token-refresh-skew-seconds "$WECHAT_TOKEN_REFRESH_SKEW_SECONDS" \
   --admin-base-path "$ADMIN_BASE_PATH" \
+  --whitelist-join-redirect-url "$WHITELIST_JOIN_REDIRECT_URL" \
+  --admin-default-per-page "$ADMIN_DEFAULT_PER_PAGE" \
+  --admin-max-per-page "$ADMIN_MAX_PER_PAGE" \
+  --max-media-bytes "$MAX_MEDIA_BYTES" \
+  --gemini-endpoint-base "$GEMINI_ENDPOINT_BASE" \
+  --gemini-model "$GEMINI_MODEL" \
+  --gemini-max-inline-bytes "$GEMINI_MAX_INLINE_BYTES" \
+  --llm-image-system-prompt "$LLM_IMAGE_SYSTEM_PROMPT" \
+  --llm-voice-system-prompt "$LLM_VOICE_SYSTEM_PROMPT" \
+  --llm-video-system-prompt "$LLM_VIDEO_SYSTEM_PROMPT" \
+  --tencent-lbs-endpoint "$TENCENT_LBS_ENDPOINT" \
+  --tencent-lbs-get-poi "$TENCENT_LBS_GET_POI" \
+  --tencent-lbs-radius-meters "$TENCENT_LBS_RADIUS_METERS" \
+  --jina-reader-endpoint "$JINA_READER_ENDPOINT" \
   --rust-log "$RUST_LOG"
 
 nohup "$@" >>"$LOG_FILE" 2>&1 &

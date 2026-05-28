@@ -33,10 +33,24 @@ ExecStart=/opt/sage-wiki-bridge/bin/sage-wiki-bridge \
   --request-body-limit-bytes 2097152 \
   --healthz-path /healthz \
   --readyz-path /readyz \
+  --wechat-api-base https://api.weixin.qq.com \
+  --wechat-oauth-authorize-base https://open.weixin.qq.com/connect/oauth2/authorize \
   --wechat-token-refresh-skew-seconds 300 \
   --admin-base-path /admin \
+  --whitelist-join-redirect-url "" \
   --admin-default-per-page 20 \
   --admin-max-per-page 100 \
+  --max-media-bytes 20971520 \
+  --gemini-endpoint-base https://generativelanguage.googleapis.com \
+  --gemini-model gemini-2.5-flash \
+  --gemini-max-inline-bytes 18874368 \
+  --llm-image-system-prompt "Describe this image for a personal knowledge base." \
+  --llm-voice-system-prompt "Transcribe and summarize this voice message." \
+  --llm-video-system-prompt "Summarize this video for a personal knowledge base." \
+  --tencent-lbs-endpoint https://apis.map.qq.com/ws/geocoder/v1/ \
+  --tencent-lbs-get-poi true \
+  --tencent-lbs-radius-meters 500 \
+  --jina-reader-endpoint https://r.jina.ai \
   --rust-log info,sage_wiki_bridge=debug
 Restart=on-failure
 RestartSec=5s
