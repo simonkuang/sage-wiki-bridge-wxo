@@ -3,6 +3,7 @@ pub mod archive;
 pub mod config;
 pub mod enrich;
 pub mod error;
+pub mod health;
 pub mod llm;
 pub mod media;
 pub mod preprocess;
@@ -26,6 +27,7 @@ use crate::{
         tencent_lbs::TencentLbsOptions,
     },
     error::BridgeError,
+    health::HealthState,
     llm::gemini::{GeminiClient, GeminiConfig},
     media::{WechatApiConfig, WechatMediaClient},
     receiver::{ReceiverConfig, ReceiverState},
@@ -82,12 +84,13 @@ pub async fn run() -> Result<(), error::BridgeError> {
         raw_archive: RawArchive::new(&config.raw_archive_dir, config.raw_archive_full),
     })
     .merge(admin::router(AdminState {
-        store,
+        store: store.clone(),
         view_key: secrets.admin_view_key.clone(),
         whitelist_join_key: secrets.whitelist_join_key.clone(),
         whitelist_join_redirect_url: config.whitelist_join_redirect_url.clone(),
         oauth_client: build_oauth_client(&config, &secrets)?,
-    }));
+    }))
+    .merge(health::router(HealthState { store }));
     let listener = tokio::net::TcpListener::bind(&config.bind_addr)
         .await
         .map_err(|err| {
