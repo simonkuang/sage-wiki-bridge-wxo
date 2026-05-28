@@ -10,6 +10,8 @@ use crate::error::BridgeError;
 const FLAG_SPECS: &[(&str, &str)] = &[
     ("--bind-addr", "APP_BIND_ADDR"),
     ("--database-url", "DATABASE_URL"),
+    ("--database-max-connections", "DATABASE_MAX_CONNECTIONS"),
+    ("--database-min-connections", "DATABASE_MIN_CONNECTIONS"),
     ("--raw-archive-dir", "RAW_ARCHIVE_DIR"),
     ("--raw-archive-full", "RAW_ARCHIVE_FULL"),
     ("--processed-artifact-dir", "PROCESSED_ARTIFACT_DIR"),
@@ -22,18 +24,29 @@ const FLAG_SPECS: &[(&str, &str)] = &[
     ("--honeypot-reply-enabled", "HONEYPOT_REPLY_ENABLED"),
     ("--honeypot-reply-text", "HONEYPOT_REPLY_TEXT"),
     ("--worker-enabled", "WORKER_ENABLED"),
+    ("--worker-id", "WORKER_ID"),
+    ("--bridge-version", "BRIDGE_VERSION"),
     ("--worker-interval-ms", "WORKER_INTERVAL_MS"),
     (
         "--worker-processing-timeout-seconds",
         "WORKER_PROCESSING_TIMEOUT_SECONDS",
     ),
+    ("--worker-retry-base-seconds", "WORKER_RETRY_BASE_SECONDS"),
+    ("--worker-retry-max-seconds", "WORKER_RETRY_MAX_SECONDS"),
     ("--http-timeout-seconds", "HTTP_TIMEOUT_SECONDS"),
+    ("--request-body-limit-bytes", "REQUEST_BODY_LIMIT_BYTES"),
+    ("--healthz-path", "HEALTHZ_PATH"),
+    ("--readyz-path", "READYZ_PATH"),
     ("--wechat-api-base", "WECHAT_API_BASE"),
     (
         "--wechat-oauth-authorize-base",
         "WECHAT_OAUTH_AUTHORIZE_BASE",
     ),
     ("--max-media-bytes", "MAX_MEDIA_BYTES"),
+    (
+        "--wechat-token-refresh-skew-seconds",
+        "WECHAT_TOKEN_REFRESH_SKEW_SECONDS",
+    ),
     (
         "--whitelist-join-redirect-url",
         "WHITELIST_JOIN_REDIRECT_URL",
@@ -55,6 +68,7 @@ const FLAG_SPECS: &[(&str, &str)] = &[
     ("--wechat-token", "WECHAT_TOKEN"),
     ("--wechat-encoding-aes-key", "WECHAT_ENCODING_AES_KEY"),
     ("--admin-view-key", "ADMIN_VIEW_KEY"),
+    ("--admin-base-path", "ADMIN_BASE_PATH"),
     ("--whitelist-join-key", "WHITELIST_JOIN_KEY"),
     ("--gemini-api-key", "GEMINI_API_KEY"),
     ("--openai-api-key", "OPENAI_API_KEY"),
@@ -63,6 +77,8 @@ const FLAG_SPECS: &[(&str, &str)] = &[
     ("--jina-api-key", "JINA_API_KEY"),
     ("--wechat-admin-openids", "WECHAT_ADMIN_OPENIDS"),
     ("--rust-log", "RUST_LOG"),
+    ("--admin-default-per-page", "ADMIN_DEFAULT_PER_PAGE"),
+    ("--admin-max-per-page", "ADMIN_MAX_PER_PAGE"),
 ];
 
 const HELP: &str = r#"sage-wiki-bridge
@@ -82,11 +98,16 @@ Core:
   --rust-log VALUE
   --bind-addr VALUE
   --database-url VALUE
+  --database-max-connections VALUE
+  --database-min-connections VALUE
   --raw-archive-dir VALUE
   --raw-archive-full true|false
   --processed-artifact-dir VALUE
   --sage-wiki-source-dir VALUE
   --http-timeout-seconds VALUE
+  --request-body-limit-bytes VALUE
+  --healthz-path VALUE
+  --readyz-path VALUE
 
 WeChat:
   --wechat-token VALUE
@@ -98,18 +119,26 @@ WeChat:
   --wechat-api-base VALUE
   --wechat-oauth-authorize-base VALUE
   --wechat-admin-openids VALUE
+  --wechat-token-refresh-skew-seconds VALUE
 
 Admin:
+  --admin-base-path VALUE
   --admin-view-key VALUE
   --whitelist-join-key VALUE
   --whitelist-join-redirect-url VALUE
+  --admin-default-per-page VALUE
+  --admin-max-per-page VALUE
   --honeypot-reply-enabled true|false
   --honeypot-reply-text VALUE
 
 Worker and external services:
   --worker-enabled true|false
+  --worker-id VALUE
+  --bridge-version VALUE
   --worker-interval-ms VALUE
   --worker-processing-timeout-seconds VALUE
+  --worker-retry-base-seconds VALUE
+  --worker-retry-max-seconds VALUE
   --max-media-bytes VALUE
   --gemini-api-key VALUE
   --gemini-endpoint-base VALUE
@@ -360,6 +389,8 @@ fn parse_list_env(value: Option<&str>) -> Vec<String> {
 pub struct AppConfig {
     pub bind_addr: String,
     pub database_url: String,
+    pub database_max_connections: u32,
+    pub database_min_connections: u32,
     pub raw_archive_dir: PathBuf,
     pub raw_archive_full: bool,
     pub processed_artifact_dir: PathBuf,
@@ -369,12 +400,20 @@ pub struct AppConfig {
     pub honeypot_reply_enabled: bool,
     pub honeypot_reply_text: String,
     pub worker_enabled: bool,
+    pub worker_id: String,
+    pub bridge_version: String,
     pub worker_interval: Duration,
     pub worker_processing_timeout: Duration,
+    pub worker_retry_base: Duration,
+    pub worker_retry_max: Duration,
     pub http_timeout: Duration,
+    pub request_body_limit_bytes: usize,
+    pub healthz_path: String,
+    pub readyz_path: String,
     pub wechat_api_base: String,
     pub wechat_oauth_authorize_base: String,
     pub max_media_bytes: u64,
+    pub wechat_token_refresh_skew: Duration,
     pub whitelist_join_redirect_url: Option<String>,
     pub gemini_endpoint_base: String,
     pub gemini_model: String,
@@ -387,6 +426,9 @@ pub struct AppConfig {
     pub tencent_lbs_radius_meters: Option<u32>,
     pub jina_reader_endpoint: String,
     pub log_filter: String,
+    pub admin_base_path: String,
+    pub admin_default_per_page: u32,
+    pub admin_max_per_page: u32,
 }
 
 impl AppConfig {
@@ -401,6 +443,8 @@ impl AppConfig {
         Ok(Self {
             bind_addr: get_string(&lookup, "APP_BIND_ADDR", "127.0.0.1:8080"),
             database_url: get_string(&lookup, "DATABASE_URL", "sqlite://data/bridge.sqlite3"),
+            database_max_connections: get_u32(&lookup, "DATABASE_MAX_CONNECTIONS", 4)?,
+            database_min_connections: get_u32(&lookup, "DATABASE_MIN_CONNECTIONS", 1)?,
             raw_archive_dir: PathBuf::from(get_string(&lookup, "RAW_ARCHIVE_DIR", "data/raw")),
             raw_archive_full: get_bool(&lookup, "RAW_ARCHIVE_FULL", true)?,
             processed_artifact_dir: PathBuf::from(get_string(
@@ -418,13 +462,32 @@ impl AppConfig {
             honeypot_reply_enabled: get_bool(&lookup, "HONEYPOT_REPLY_ENABLED", false)?,
             honeypot_reply_text: get_string(&lookup, "HONEYPOT_REPLY_TEXT", "Message received."),
             worker_enabled: get_bool(&lookup, "WORKER_ENABLED", true)?,
+            worker_id: get_string(&lookup, "WORKER_ID", "worker-main"),
+            bridge_version: get_string(&lookup, "BRIDGE_VERSION", env!("CARGO_PKG_VERSION")),
             worker_interval: Duration::from_millis(get_u64(&lookup, "WORKER_INTERVAL_MS", 1000)?),
             worker_processing_timeout: Duration::from_secs(get_u64(
                 &lookup,
                 "WORKER_PROCESSING_TIMEOUT_SECONDS",
                 15 * 60,
             )?),
+            worker_retry_base: Duration::from_secs(get_u64(
+                &lookup,
+                "WORKER_RETRY_BASE_SECONDS",
+                10,
+            )?),
+            worker_retry_max: Duration::from_secs(get_u64(
+                &lookup,
+                "WORKER_RETRY_MAX_SECONDS",
+                300,
+            )?),
             http_timeout: Duration::from_secs(get_u64(&lookup, "HTTP_TIMEOUT_SECONDS", 30)?),
+            request_body_limit_bytes: get_usize(
+                &lookup,
+                "REQUEST_BODY_LIMIT_BYTES",
+                2 * 1024 * 1024,
+            )?,
+            healthz_path: get_string(&lookup, "HEALTHZ_PATH", "/healthz"),
+            readyz_path: get_string(&lookup, "READYZ_PATH", "/readyz"),
             wechat_api_base: get_string(&lookup, "WECHAT_API_BASE", "https://api.weixin.qq.com"),
             wechat_oauth_authorize_base: get_string(
                 &lookup,
@@ -432,6 +495,11 @@ impl AppConfig {
                 "https://open.weixin.qq.com/connect/oauth2/authorize",
             ),
             max_media_bytes: get_u64(&lookup, "MAX_MEDIA_BYTES", 20 * 1024 * 1024)?,
+            wechat_token_refresh_skew: Duration::from_secs(get_u64(
+                &lookup,
+                "WECHAT_TOKEN_REFRESH_SKEW_SECONDS",
+                300,
+            )?),
             whitelist_join_redirect_url: get_optional_string(
                 &lookup,
                 "WHITELIST_JOIN_REDIRECT_URL",
@@ -467,6 +535,9 @@ impl AppConfig {
             tencent_lbs_radius_meters: get_optional_u32(&lookup, "TENCENT_LBS_RADIUS_METERS")?,
             jina_reader_endpoint: get_string(&lookup, "JINA_READER_ENDPOINT", "https://r.jina.ai"),
             log_filter: get_string(&lookup, "RUST_LOG", "info,sage_wiki_bridge=debug"),
+            admin_base_path: get_string(&lookup, "ADMIN_BASE_PATH", "/admin"),
+            admin_default_per_page: get_u32(&lookup, "ADMIN_DEFAULT_PER_PAGE", 20)?,
+            admin_max_per_page: get_u32(&lookup, "ADMIN_MAX_PER_PAGE", 100)?,
         })
     }
 }
@@ -503,6 +574,30 @@ where
     };
     value
         .parse::<u64>()
+        .map_err(|_| BridgeError::Config(format!("{key} must be a positive integer")))
+}
+
+fn get_u32<F>(lookup: &F, key: &str, default: u32) -> Result<u32, BridgeError>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let Some(value) = lookup(key).filter(|value| !value.trim().is_empty()) else {
+        return Ok(default);
+    };
+    value
+        .parse::<u32>()
+        .map_err(|_| BridgeError::Config(format!("{key} must be a positive integer")))
+}
+
+fn get_usize<F>(lookup: &F, key: &str, default: usize) -> Result<usize, BridgeError>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let Some(value) = lookup(key).filter(|value| !value.trim().is_empty()) else {
+        return Ok(default);
+    };
+    value
+        .parse::<usize>()
         .map_err(|_| BridgeError::Config(format!("{key} must be a positive integer")))
 }
 

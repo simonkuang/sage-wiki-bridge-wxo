@@ -79,6 +79,22 @@ pub struct Worker {
     media_processor: Arc<dyn MediaJobProcessor>,
     worker_id: String,
     bridge_version: String,
+    retry_policy: RetryPolicy,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RetryPolicy {
+    pub base_delay: std::time::Duration,
+    pub max_delay: std::time::Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            base_delay: std::time::Duration::from_secs(10),
+            max_delay: std::time::Duration::from_secs(300),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +118,7 @@ impl Worker {
             media_processor: Arc::new(NoopMediaJobProcessor),
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
+            retry_policy: RetryPolicy::default(),
         }
     }
 
@@ -120,6 +137,7 @@ impl Worker {
             media_processor: Arc::new(NoopMediaJobProcessor),
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
+            retry_policy: RetryPolicy::default(),
         }
     }
 
@@ -139,6 +157,7 @@ impl Worker {
             media_processor,
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
+            retry_policy: RetryPolicy::default(),
         }
     }
 
@@ -147,6 +166,11 @@ impl Worker {
         processed_artifact_store: ProcessedArtifactStore,
     ) -> Self {
         self.processed_artifact_store = Some(processed_artifact_store);
+        self
+    }
+
+    pub fn with_retry_policy(mut self, retry_policy: RetryPolicy) -> Self {
+        self.retry_policy = retry_policy;
         self
     }
 
@@ -165,7 +189,7 @@ impl Worker {
                 })
             }
             Err(err) => {
-                let next_run_at = next_retry_at(now, job.attempts);
+                let next_run_at = next_retry_at(now, job.attempts, self.retry_policy);
                 self.store
                     .mark_job_retry_or_failed(job.id, &err.to_string(), &next_run_at)
                     .await?;
@@ -349,17 +373,19 @@ fn message_key(message: &StoredMessage) -> String {
         .unwrap_or_else(|| format!("message_{}", message.id))
 }
 
-fn next_retry_at(now: &str, attempts: i64) -> String {
+fn next_retry_at(now: &str, attempts: i64, retry_policy: RetryPolicy) -> String {
     let base = OffsetDateTime::parse(now, &Rfc3339).unwrap_or_else(|_| OffsetDateTime::now_utc());
-    let delay_seconds = retry_delay_seconds(attempts);
+    let delay_seconds = retry_delay_seconds(attempts, retry_policy);
     (base + TimeDuration::seconds(delay_seconds))
         .format(&Rfc3339)
         .unwrap_or_else(|_| now.to_string())
 }
 
-fn retry_delay_seconds(attempts: i64) -> i64 {
+fn retry_delay_seconds(attempts: i64, retry_policy: RetryPolicy) -> i64 {
     let exponent = attempts.saturating_sub(1).clamp(0, 5) as u32;
-    (10_i64 * 2_i64.pow(exponent)).min(300)
+    let base = retry_policy.base_delay.as_secs().min(i64::MAX as u64) as i64;
+    let max = retry_policy.max_delay.as_secs().min(i64::MAX as u64) as i64;
+    base.saturating_mul(2_i64.pow(exponent)).min(max)
 }
 
 #[cfg(test)]

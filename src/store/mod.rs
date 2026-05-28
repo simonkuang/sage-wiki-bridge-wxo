@@ -133,12 +133,20 @@ pub struct MessageDetail {
 
 impl Store {
     pub async fn connect(database_url: &str) -> Result<Self, BridgeError> {
+        Self::connect_with_pool_options(database_url, 4, 1).await
+    }
+
+    pub async fn connect_with_pool_options(
+        database_url: &str,
+        max_connections: u32,
+        min_connections: u32,
+    ) -> Result<Self, BridgeError> {
         let options = SqliteConnectOptions::from_str(database_url)
             .map_err(|err| BridgeError::Database(err.to_string()))?
             .create_if_missing(true);
         let pool = SqlitePoolOptions::new()
-            .max_connections(4)
-            .min_connections(1)
+            .max_connections(max_connections)
+            .min_connections(min_connections.min(max_connections))
             .connect_with(options)
             .await
             .map_err(|err| BridgeError::Database(err.to_string()))?;

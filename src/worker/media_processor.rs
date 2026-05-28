@@ -29,9 +29,9 @@ impl GeminiMediaJobProcessor {
         media_client: WechatMediaClient,
         llm_provider: Arc<dyn LlmProvider>,
         raw_root: impl Into<PathBuf>,
+        token_refresh_skew: std::time::Duration,
     ) -> Self {
-        let token_cache =
-            WechatAccessTokenCache::new(media_client.clone(), std::time::Duration::from_secs(300));
+        let token_cache = WechatAccessTokenCache::new(media_client.clone(), token_refresh_skew);
         Self {
             media_client,
             token_cache,
@@ -247,6 +247,7 @@ mod tests {
             .unwrap(),
             Arc::new(FakeLlmProvider),
             raw_root.path(),
+            Duration::from_secs(300),
         )
         .with_prompts(
             "describe image for test",

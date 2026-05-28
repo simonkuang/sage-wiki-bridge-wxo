@@ -36,7 +36,7 @@ use crate::{
     wechat::oauth::{WechatOAuthClient, WechatOAuthConfig},
     worker::{
         ExternalClients, MediaJobProcessor, NoopExternalClients, NoopMediaJobProcessor,
-        WorkOutcome, Worker, media_processor::GeminiMediaJobProcessor,
+        RetryPolicy, WorkOutcome, Worker, media_processor::GeminiMediaJobProcessor,
     },
 };
 
@@ -62,7 +62,12 @@ pub async fn run_with_config(runtime_config: RuntimeConfig) -> Result<(), error:
     let wechat_token = secrets.require_wechat_token()?.to_string();
 
     ensure_sqlite_parent(&config.database_url)?;
-    let store = Store::connect(&config.database_url).await?;
+    let store = Store::connect_with_pool_options(
+        &config.database_url,
+        config.database_max_connections,
+        config.database_min_connections,
+    )
+    .await?;
     store.migrate().await?;
     seed_configured_admin_openids(&store, &secrets).await?;
 
@@ -73,10 +78,14 @@ pub async fn run_with_config(runtime_config: RuntimeConfig) -> Result<(), error:
         SourceWriter::new(&config.source_dir),
         external_clients,
         media_processor,
-        "worker-main",
-        env!("CARGO_PKG_VERSION"),
+        config.worker_id.clone(),
+        config.bridge_version.clone(),
     )
-    .with_processed_artifact_store(ProcessedArtifactStore::new(&config.processed_artifact_dir));
+    .with_processed_artifact_store(ProcessedArtifactStore::new(&config.processed_artifact_dir))
+    .with_retry_policy(RetryPolicy {
+        base_delay: config.worker_retry_base,
+        max_delay: config.worker_retry_max,
+    });
 
     if config.worker_enabled {
         let interval = config.worker_interval;
@@ -95,18 +104,26 @@ pub async fn run_with_config(runtime_config: RuntimeConfig) -> Result<(), error:
             wechat_encoding_aes_key: secrets.wechat_encoding_aes_key.clone(),
             honeypot_reply_enabled: config.honeypot_reply_enabled,
             honeypot_reply_text: config.honeypot_reply_text.clone(),
+            request_body_limit_bytes: config.request_body_limit_bytes,
         },
         store: store.clone(),
         raw_archive: RawArchive::new(&config.raw_archive_dir, config.raw_archive_full),
     })
     .merge(admin::router(AdminState {
         store: store.clone(),
+        base_path: config.admin_base_path.clone(),
         view_key: secrets.admin_view_key.clone(),
         whitelist_join_key: secrets.whitelist_join_key.clone(),
         whitelist_join_redirect_url: config.whitelist_join_redirect_url.clone(),
         oauth_client: build_oauth_client(&config, &secrets)?,
+        default_per_page: config.admin_default_per_page,
+        max_per_page: config.admin_max_per_page,
     }))
-    .merge(health::router(HealthState { store }));
+    .merge(health::router(HealthState {
+        store,
+        healthz_path: config.healthz_path.clone(),
+        readyz_path: config.readyz_path.clone(),
+    }));
     let listener = tokio::net::TcpListener::bind(&config.bind_addr)
         .await
         .map_err(|err| {
@@ -237,6 +254,7 @@ fn build_media_processor(
             media_client,
             Arc::new(gemini_client),
             &config.raw_archive_dir,
+            config.wechat_token_refresh_skew,
         )
         .with_prompts(
             config.llm_image_system_prompt.clone(),

@@ -12,6 +12,8 @@ ExecStart=/opt/sage-wiki-bridge/bin/sage-wiki-bridge \
   --env-file /etc/sage-wiki-bridge.env \
   --bind-addr 127.0.0.1:8080 \
   --database-url sqlite:///opt/sage-wiki-bridge/data/bridge.sqlite3 \
+  --database-max-connections 4 \
+  --database-min-connections 1 \
   --raw-archive-dir /opt/sage-wiki-bridge/data/raw \
   --raw-archive-full true \
   --processed-artifact-dir /opt/sage-wiki-bridge/data/processed \
@@ -21,9 +23,20 @@ ExecStart=/opt/sage-wiki-bridge/bin/sage-wiki-bridge \
   --honeypot-reply-enabled false \
   --honeypot-reply-text "Message received." \
   --worker-enabled true \
+  --worker-id worker-main \
+  --bridge-version 0.1.0 \
   --worker-interval-ms 1000 \
   --worker-processing-timeout-seconds 900 \
+  --worker-retry-base-seconds 10 \
+  --worker-retry-max-seconds 300 \
   --http-timeout-seconds 30 \
+  --request-body-limit-bytes 2097152 \
+  --healthz-path /healthz \
+  --readyz-path /readyz \
+  --wechat-token-refresh-skew-seconds 300 \
+  --admin-base-path /admin \
+  --admin-default-per-page 20 \
+  --admin-max-per-page 100 \
   --rust-log info,sage_wiki_bridge=debug
 Restart=on-failure
 RestartSec=5s

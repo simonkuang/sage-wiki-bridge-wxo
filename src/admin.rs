@@ -18,10 +18,13 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct AdminState {
     pub store: Store,
+    pub base_path: String,
     pub view_key: Option<String>,
     pub whitelist_join_key: Option<String>,
     pub whitelist_join_redirect_url: Option<String>,
     pub oauth_client: Option<WechatOAuthClient>,
+    pub default_per_page: u32,
+    pub max_per_page: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,10 +51,13 @@ struct JoinQuery {
 }
 
 pub fn router(state: AdminState) -> Router {
+    let messages_path = format!("{}/messages", state.base_path);
+    let message_detail_path = format!("{}/messages/{{id}}", state.base_path);
+    let whitelist_join_path = format!("{}/whitelist/join", state.base_path);
     Router::new()
-        .route("/admin/messages", get(list_messages))
-        .route("/admin/messages/{id}", get(message_detail))
-        .route("/admin/whitelist/join", get(join_whitelist))
+        .route(&messages_path, get(list_messages))
+        .route(&message_detail_path, get(message_detail))
+        .route(&whitelist_join_path, get(join_whitelist))
         .with_state(Arc::new(state))
 }
 
@@ -64,7 +70,10 @@ async fn list_messages(
     }
 
     let page = query.page.unwrap_or(1).max(1);
-    let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
+    let per_page = query
+        .per_page
+        .unwrap_or(state.default_per_page)
+        .clamp(1, state.max_per_page.max(1));
     let sort_desc = !matches!(query.sort.as_deref(), Some("received_at_asc"));
     let keyword = query.q.as_ref().map(|value| value.trim().to_string());
     let message_type = query
@@ -87,6 +96,7 @@ async fn list_messages(
     {
         Ok(result) => Html(render_list_page(
             &query.key.unwrap_or_default(),
+            &state.base_path,
             keyword.as_deref().unwrap_or(""),
             message_type.as_deref().unwrap_or(""),
             status.as_deref().unwrap_or(""),
@@ -108,9 +118,12 @@ async fn message_detail(
     }
 
     match state.store.get_message_detail(id).await {
-        Ok(detail) => {
-            Html(render_detail_page(&query.key.unwrap_or_default(), &detail)).into_response()
-        }
+        Ok(detail) => Html(render_detail_page(
+            &query.key.unwrap_or_default(),
+            &state.base_path,
+            &detail,
+        ))
+        .into_response(),
         Err(err) => error_response(err),
     }
 }
@@ -176,6 +189,7 @@ fn authorized(provided: Option<&str>, expected: Option<&str>) -> bool {
 
 fn render_list_page(
     key: &str,
+    base_path: &str,
     keyword: &str,
     message_type: &str,
     status: &str,
@@ -194,8 +208,9 @@ fn render_list_page(
         .iter()
         .map(|item| {
             format!(
-                "<tr><td><a href=\"/admin/messages/{}?key={}\">{}</a></td>\
+                "<tr><td><a href=\"{}/messages/{}?key={}\">{}</a></td>\
                  <td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                escape_attr(base_path),
                 item.id,
                 escape_attr(key),
                 item.id,
@@ -223,8 +238,8 @@ fn render_list_page(
          <p>Total: {} | Page: {}</p>\
          <table><thead><tr><th>ID</th><th>Received</th><th>Type</th><th>Status</th>\
          <th>OpenID Hash</th><th>Original</th><th>Processed</th></tr></thead><tbody>{rows}</tbody></table>\
-         <nav><a href=\"/admin/messages?key={}&q={}&msg_type={}&status={}&sort={sort}&page={previous}&per_page={}\">Previous</a>\
-         <a href=\"/admin/messages?key={}&q={}&msg_type={}&status={}&sort={sort}&page={next}&per_page={}\">Next</a></nav>",
+         <nav><a href=\"{}/messages?key={}&q={}&msg_type={}&status={}&sort={sort}&page={previous}&per_page={}\">Previous</a>\
+         <a href=\"{}/messages?key={}&q={}&msg_type={}&status={}&sort={sort}&page={next}&per_page={}\">Next</a></nav>",
         escape_attr(key),
         escape_attr(keyword),
         escape_attr(message_type),
@@ -233,11 +248,13 @@ fn render_list_page(
         if sort_desc { "" } else { "selected" },
         page.total,
         page.page,
+        escape_attr(base_path),
         escape_attr(key),
         escape_attr(keyword),
         escape_attr(message_type),
         escape_attr(status),
         page.per_page,
+        escape_attr(base_path),
         escape_attr(key),
         escape_attr(keyword),
         escape_attr(message_type),
@@ -247,7 +264,7 @@ fn render_list_page(
     )
 }
 
-fn render_detail_page(key: &str, detail: &MessageDetail) -> String {
+fn render_detail_page(key: &str, base_path: &str, detail: &MessageDetail) -> String {
     let fields = [
         ("id", detail.id.to_string()),
         ("request_id", detail.request_id.clone()),
@@ -292,9 +309,10 @@ fn render_detail_page(key: &str, detail: &MessageDetail) -> String {
 
     format!(
         "<!doctype html><meta charset=\"utf-8\"><title>Message {}</title>{style}\
-         <a href=\"/admin/messages?key={}\">Back</a><h1>Message {}</h1><dl>{fields}</dl>\
+         <a href=\"{}/messages?key={}\">Back</a><h1>Message {}</h1><dl>{fields}</dl>\
          <h2>Original Text</h2><pre>{}</pre><h2>Processed Text</h2><pre>{}</pre>",
         detail.id,
+        escape_attr(base_path),
         escape_attr(key),
         detail.id,
         escape_html(detail.content_text.as_deref().unwrap_or("")),
@@ -410,10 +428,13 @@ mod tests {
     fn admin_state(store: Store) -> AdminState {
         AdminState {
             store,
+            base_path: "/admin".to_string(),
             view_key: Some("view-key".to_string()),
             whitelist_join_key: Some("join-key".to_string()),
             whitelist_join_redirect_url: None,
             oauth_client: None,
+            default_per_page: 20,
+            max_per_page: 100,
         }
     }
 
@@ -499,6 +520,7 @@ mod tests {
         let api_base = spawn_mock_oauth().await;
         let app = router(AdminState {
             store: store.clone(),
+            base_path: "/admin".to_string(),
             view_key: Some("view-key".to_string()),
             whitelist_join_key: Some("join-key".to_string()),
             whitelist_join_redirect_url: Some(
@@ -517,6 +539,8 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            default_per_page: 20,
+            max_per_page: 100,
         });
 
         let response = app

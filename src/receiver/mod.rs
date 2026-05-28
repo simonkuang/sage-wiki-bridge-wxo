@@ -3,6 +3,7 @@ use std::sync::Arc;
 use axum::{
     Router,
     body::Body,
+    extract::DefaultBodyLimit,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -31,6 +32,7 @@ pub struct ReceiverConfig {
     pub wechat_encoding_aes_key: Option<String>,
     pub honeypot_reply_enabled: bool,
     pub honeypot_reply_text: String,
+    pub request_body_limit_bytes: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +63,7 @@ pub fn router(state: ReceiverState) -> Router {
     let path = state.config.callback_path.clone();
     Router::new()
         .route(&path, get(verify_callback).post(receive_callback))
+        .layer(DefaultBodyLimit::max(state.config.request_body_limit_bytes))
         .with_state(Arc::new(state))
 }
 
@@ -445,6 +448,7 @@ mod tests {
                 wechat_encoding_aes_key: None,
                 honeypot_reply_enabled: false,
                 honeypot_reply_text: "Message received.".to_string(),
+                request_body_limit_bytes: 2 * 1024 * 1024,
             },
             store,
             raw_archive: RawArchive::new(temp, raw_archive_full),

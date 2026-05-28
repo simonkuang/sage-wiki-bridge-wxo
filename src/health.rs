@@ -13,12 +13,16 @@ use crate::store::Store;
 #[derive(Debug, Clone)]
 pub struct HealthState {
     pub store: Store,
+    pub healthz_path: String,
+    pub readyz_path: String,
 }
 
 pub fn router(state: HealthState) -> Router {
+    let healthz_path = state.healthz_path.clone();
+    let readyz_path = state.readyz_path.clone();
     Router::new()
-        .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
+        .route(&healthz_path, get(healthz))
+        .route(&readyz_path, get(readyz))
         .with_state(Arc::new(state))
 }
 
@@ -55,7 +59,11 @@ mod tests {
     async fn test_app() -> Router {
         let store = Store::connect("sqlite::memory:").await.unwrap();
         store.migrate().await.unwrap();
-        router(HealthState { store })
+        router(HealthState {
+            store,
+            healthz_path: "/healthz".to_string(),
+            readyz_path: "/readyz".to_string(),
+        })
     }
 
     #[tokio::test]
