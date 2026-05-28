@@ -31,6 +31,8 @@ struct ListQuery {
     per_page: Option<u32>,
     sort: Option<String>,
     q: Option<String>,
+    msg_type: Option<String>,
+    status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +67,11 @@ async fn list_messages(
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let sort_desc = !matches!(query.sort.as_deref(), Some("received_at_asc"));
     let keyword = query.q.as_ref().map(|value| value.trim().to_string());
+    let message_type = query
+        .msg_type
+        .as_ref()
+        .map(|value| value.trim().to_string());
+    let status = query.status.as_ref().map(|value| value.trim().to_string());
 
     match state
         .store
@@ -72,6 +79,8 @@ async fn list_messages(
             page,
             per_page,
             keyword: keyword.clone().filter(|value| !value.is_empty()),
+            message_type: message_type.clone().filter(|value| !value.is_empty()),
+            status: status.clone().filter(|value| !value.is_empty()),
             sort_desc,
         })
         .await
@@ -79,6 +88,8 @@ async fn list_messages(
         Ok(result) => Html(render_list_page(
             &query.key.unwrap_or_default(),
             keyword.as_deref().unwrap_or(""),
+            message_type.as_deref().unwrap_or(""),
+            status.as_deref().unwrap_or(""),
             sort_desc,
             &result,
         ))
@@ -166,6 +177,8 @@ fn authorized(provided: Option<&str>, expected: Option<&str>) -> bool {
 fn render_list_page(
     key: &str,
     keyword: &str,
+    message_type: &str,
+    status: &str,
     sort_desc: bool,
     page: &crate::store::MessageListPage,
 ) -> String {
@@ -202,25 +215,33 @@ fn render_list_page(
          <h1>Messages</h1>\
          <form method=\"get\"><input type=\"hidden\" name=\"key\" value=\"{}\">\
          <input name=\"q\" value=\"{}\" placeholder=\"keyword\">\
+         <input name=\"msg_type\" value=\"{}\" placeholder=\"type\">\
+         <input name=\"status\" value=\"{}\" placeholder=\"status\">\
          <select name=\"sort\"><option value=\"received_at_desc\" {}>newest</option>\
          <option value=\"received_at_asc\" {}>oldest</option></select>\
          <button type=\"submit\">Search</button></form>\
          <p>Total: {} | Page: {}</p>\
          <table><thead><tr><th>ID</th><th>Received</th><th>Type</th><th>Status</th>\
          <th>OpenID Hash</th><th>Original</th><th>Processed</th></tr></thead><tbody>{rows}</tbody></table>\
-         <nav><a href=\"/admin/messages?key={}&q={}&sort={sort}&page={previous}&per_page={}\">Previous</a>\
-         <a href=\"/admin/messages?key={}&q={}&sort={sort}&page={next}&per_page={}\">Next</a></nav>",
+         <nav><a href=\"/admin/messages?key={}&q={}&msg_type={}&status={}&sort={sort}&page={previous}&per_page={}\">Previous</a>\
+         <a href=\"/admin/messages?key={}&q={}&msg_type={}&status={}&sort={sort}&page={next}&per_page={}\">Next</a></nav>",
         escape_attr(key),
         escape_attr(keyword),
+        escape_attr(message_type),
+        escape_attr(status),
         if sort_desc { "selected" } else { "" },
         if sort_desc { "" } else { "selected" },
         page.total,
         page.page,
         escape_attr(key),
         escape_attr(keyword),
+        escape_attr(message_type),
+        escape_attr(status),
         page.per_page,
         escape_attr(key),
         escape_attr(keyword),
+        escape_attr(message_type),
+        escape_attr(status),
         page.per_page,
         style = STYLE
     )

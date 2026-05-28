@@ -73,6 +73,8 @@ pub struct MessageListQuery {
     pub page: u32,
     pub per_page: u32,
     pub keyword: Option<String>,
+    pub message_type: Option<String>,
+    pub status: Option<String>,
     pub sort_desc: bool,
 }
 
@@ -485,40 +487,29 @@ impl Store {
         let limit = i64::from(per_page);
         let keyword = query.keyword.as_deref().filter(|value| !value.is_empty());
         let keyword_like = keyword.map(|value| format!("%{value}%"));
+        let message_type = query
+            .message_type
+            .as_deref()
+            .filter(|value| !value.is_empty());
+        let status = query.status.as_deref().filter(|value| !value.is_empty());
 
-        let total: i64 = if let Some(keyword_like) = &keyword_like {
-            sqlx::query_scalar(
-                r#"
-                SELECT COUNT(*)
-                FROM messages
-                WHERE content_text LIKE ?1
-                   OR processed_text LIKE ?1
-                   OR link_url LIKE ?1
-                   OR location_label LIKE ?1
-                   OR from_openid_hash LIKE ?1
-                "#,
-            )
-            .bind(keyword_like)
+        let total: i64 = sqlx::query_scalar(message_filter_count_sql())
+            .bind(&keyword_like)
+            .bind(message_type)
+            .bind(status)
             .fetch_one(&self.pool)
             .await
-            .map_err(|err| BridgeError::Database(err.to_string()))?
-        } else {
-            sqlx::query_scalar("SELECT COUNT(*) FROM messages")
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|err| BridgeError::Database(err.to_string()))?
-        };
+            .map_err(|err| BridgeError::Database(err.to_string()))?;
 
         let sql = if query.sort_desc {
-            list_messages_sql("DESC", keyword.is_some())
+            list_messages_sql("DESC")
         } else {
-            list_messages_sql("ASC", keyword.is_some())
+            list_messages_sql("ASC")
         };
-        let mut statement = sqlx::query(&sql);
-        if let Some(keyword_like) = &keyword_like {
-            statement = statement.bind(keyword_like);
-        }
-        let rows = statement
+        let rows = sqlx::query(&sql)
+            .bind(&keyword_like)
+            .bind(message_type)
+            .bind(status)
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
@@ -593,25 +584,28 @@ impl Store {
     }
 }
 
-fn list_messages_sql(order: &str, with_keyword: bool) -> String {
-    let (filter, limit_placeholder, offset_placeholder) = if with_keyword {
-        (
-            "WHERE content_text LIKE ?1 OR processed_text LIKE ?1 OR link_url LIKE ?1 OR location_label LIKE ?1 OR from_openid_hash LIKE ?1",
-            "?2",
-            "?3",
-        )
-    } else {
-        ("", "?1", "?2")
-    };
+fn message_filter_count_sql() -> &'static str {
+    r#"
+    SELECT COUNT(*)
+    FROM messages
+    WHERE (?1 IS NULL OR content_text LIKE ?1 OR processed_text LIKE ?1 OR link_url LIKE ?1 OR location_label LIKE ?1 OR media_id LIKE ?1 OR from_openid_hash LIKE ?1)
+      AND (?2 IS NULL OR message_type = ?2)
+      AND (?3 IS NULL OR status = ?3)
+    "#
+}
+
+fn list_messages_sql(order: &str) -> String {
     format!(
         r#"
         SELECT id, received_at, message_type, from_openid_hash, status,
                substr(COALESCE(content_text, link_url, location_label, media_id, ''), 1, 160) AS content_preview,
                substr(COALESCE(processed_text, ''), 1, 160) AS processed_preview
         FROM messages
-        {filter}
+        WHERE (?1 IS NULL OR content_text LIKE ?1 OR processed_text LIKE ?1 OR link_url LIKE ?1 OR location_label LIKE ?1 OR media_id LIKE ?1 OR from_openid_hash LIKE ?1)
+          AND (?2 IS NULL OR message_type = ?2)
+          AND (?3 IS NULL OR status = ?3)
         ORDER BY received_at {order}, id {order}
-        LIMIT {limit_placeholder} OFFSET {offset_placeholder}
+        LIMIT ?4 OFFSET ?5
         "#
     )
 }
@@ -702,6 +696,52 @@ mod tests {
             .unwrap();
 
         assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn list_messages_filters_by_keyword_type_and_status() {
+        let store = test_store().await;
+        store
+            .insert_message_idempotent(&MessageInsert {
+                request_id: "req_text".to_string(),
+                wechat_msg_id: Some("msg_text".to_string()),
+                content_text: Some("alpha text".to_string()),
+                message_type: "text".to_string(),
+                status: "queued".to_string(),
+                ..message("msg_text")
+            })
+            .await
+            .unwrap();
+        let image_id = store
+            .insert_message_idempotent(&MessageInsert {
+                request_id: "req_image".to_string(),
+                wechat_msg_id: Some("msg_image".to_string()),
+                content_text: None,
+                media_id: Some("alpha-media".to_string()),
+                message_type: "image".to_string(),
+                status: "source_written".to_string(),
+                ..message("msg_image")
+            })
+            .await
+            .unwrap();
+
+        let page = store
+            .list_messages(&MessageListQuery {
+                page: 1,
+                per_page: 20,
+                keyword: Some("alpha".to_string()),
+                message_type: Some("image".to_string()),
+                status: Some("source_written".to_string()),
+                sort_desc: true,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, image_id);
+        assert_eq!(page.items[0].message_type, "image");
+        assert_eq!(page.items[0].status, "source_written");
     }
 
     #[tokio::test]
