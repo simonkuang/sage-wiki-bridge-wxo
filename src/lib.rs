@@ -14,14 +14,14 @@ pub mod telemetry;
 pub mod wechat;
 pub mod worker;
 
-use std::{env, fs, path::Path, sync::Arc};
+use std::{env, path::Path, sync::Arc};
 
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
     admin::AdminState,
     archive::{ProcessedArtifactStore, RawArchive},
-    config::{AppConfig, EnvSecrets},
+    config::{AppConfig, EnvSecrets, RuntimeConfig, runtime_config_from_args},
     enrich::{
         http_client::HttpExternalClients, jina_reader::JinaReaderOptions,
         tencent_lbs::TencentLbsOptions,
@@ -41,10 +41,24 @@ use crate::{
 };
 
 pub async fn run() -> Result<(), error::BridgeError> {
-    load_env_files()?;
-    telemetry::init();
-    let secrets = EnvSecrets::from_env();
-    let config = AppConfig::from_env()?;
+    run_from_args(env::args()).await
+}
+
+pub async fn run_from_args<I, S>(args: I) -> Result<(), error::BridgeError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let Some(runtime_config) = runtime_config_from_args(args)? else {
+        return Ok(());
+    };
+    run_with_config(runtime_config).await
+}
+
+pub async fn run_with_config(runtime_config: RuntimeConfig) -> Result<(), error::BridgeError> {
+    let secrets = runtime_config.secrets;
+    let config = runtime_config.app;
+    telemetry::init(&config.log_filter);
     let wechat_token = secrets.require_wechat_token()?.to_string();
 
     ensure_sqlite_parent(&config.database_url)?;
@@ -109,74 +123,6 @@ pub async fn run() -> Result<(), error::BridgeError> {
     axum::serve(listener, app)
         .await
         .map_err(|err| BridgeError::Config(format!("server failed: {err}")))
-}
-
-fn load_env_files() -> Result<(), BridgeError> {
-    if let Ok(path) = env::var("SAGE_WIKI_BRIDGE_ENV_FILE") {
-        load_simple_env_file(Path::new(&path), true)?;
-    }
-    dotenvy::dotenv().ok();
-    if let Ok(exe_path) = env::current_exe()
-        && let Some(exe_dir) = exe_path.parent()
-    {
-        dotenvy::from_path(exe_dir.join(".env")).ok();
-    }
-    Ok(())
-}
-
-fn load_simple_env_file(path: &Path, override_existing: bool) -> Result<(), BridgeError> {
-    let content = fs::read_to_string(path).map_err(|err| {
-        BridgeError::Config(format!("failed to read env file {}: {err}", path.display()))
-    })?;
-    for (index, line) in content.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            return Err(BridgeError::Config(format!(
-                "invalid env file {} line {}: missing '='",
-                path.display(),
-                index + 1
-            )));
-        };
-        let key = key.trim();
-        if key.is_empty()
-            || !key
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-        {
-            return Err(BridgeError::Config(format!(
-                "invalid env file {} line {}: invalid key",
-                path.display(),
-                index + 1
-            )));
-        }
-        let value = unquote_env_value(value.trim());
-        let should_set = override_existing
-            || env::var_os(key).is_none()
-            || env::var(key)
-                .map(|existing| existing.trim().is_empty())
-                .unwrap_or(false);
-        if should_set {
-            unsafe {
-                env::set_var(key, value);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn unquote_env_value(value: &str) -> &str {
-    if value.len() >= 2 {
-        let bytes = value.as_bytes();
-        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
-        {
-            return &value[1..value.len() - 1];
-        }
-    }
-    value
 }
 
 async fn seed_configured_admin_openids(
@@ -387,28 +333,4 @@ fn ensure_sqlite_parent(database_url: &str) -> Result<(), BridgeError> {
         std::fs::create_dir_all(parent)?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn explicit_env_file_overrides_empty_existing_value() {
-        let temp = tempfile::NamedTempFile::new().unwrap();
-        fs::write(temp.path(), "SAGE_WIKI_BRIDGE_TEST_TOKEN=from-file\n").unwrap();
-        unsafe {
-            env::set_var("SAGE_WIKI_BRIDGE_TEST_TOKEN", "");
-        }
-
-        load_simple_env_file(temp.path(), true).unwrap();
-
-        assert_eq!(
-            env::var("SAGE_WIKI_BRIDGE_TEST_TOKEN").unwrap(),
-            "from-file"
-        );
-        unsafe {
-            env::remove_var("SAGE_WIKI_BRIDGE_TEST_TOKEN");
-        }
-    }
 }

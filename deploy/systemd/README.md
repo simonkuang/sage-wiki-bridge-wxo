@@ -29,6 +29,12 @@ sudo systemctl restart sage-wiki-bridge
 sudo journalctl -u sage-wiki-bridge -f
 ```
 
-For manual binary runs, either run from a directory containing `.env`, place `.env` next to the binary, or set `SAGE_WIKI_BRIDGE_ENV_FILE=/etc/sage-wiki-bridge.env`.
+The binary does not load `.env` implicitly. Config sources must be enabled explicitly:
+
+```sh
+/opt/sage-wiki-bridge/bin/sage-wiki-bridge --env-file /etc/sage-wiki-bridge.env
+```
+
+Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit keeps operational startup settings in `ExecStart` flags and keeps secrets in `/etc/sage-wiki-bridge.env`.
 
 The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `SAGE_WIKI_SOURCE_DIR` differs, update `ReadWritePaths` before starting.

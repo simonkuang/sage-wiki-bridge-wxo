@@ -8,8 +8,23 @@ Type=simple
 User=sagewiki
 Group=sagewiki
 WorkingDirectory=/opt/sage-wiki-bridge
-EnvironmentFile=/etc/sage-wiki-bridge.env
-ExecStart=/opt/sage-wiki-bridge/bin/sage-wiki-bridge
+ExecStart=/opt/sage-wiki-bridge/bin/sage-wiki-bridge \
+  --env-file /etc/sage-wiki-bridge.env \
+  --bind-addr 127.0.0.1:8080 \
+  --database-url sqlite:///opt/sage-wiki-bridge/data/bridge.sqlite3 \
+  --raw-archive-dir /opt/sage-wiki-bridge/data/raw \
+  --raw-archive-full true \
+  --processed-artifact-dir /opt/sage-wiki-bridge/data/processed \
+  --sage-wiki-source-dir /opt/sage-wiki/source \
+  --wechat-callback-path /wechat/callback \
+  --wechat-encrypted-callback-enabled false \
+  --honeypot-reply-enabled false \
+  --honeypot-reply-text "Message received." \
+  --worker-enabled true \
+  --worker-interval-ms 1000 \
+  --worker-processing-timeout-seconds 900 \
+  --http-timeout-seconds 30 \
+  --rust-log info,sage_wiki_bridge=debug
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20s

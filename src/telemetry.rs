@@ -4,9 +4,9 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 
 static INIT: OnceLock<()> = OnceLock::new();
 
-pub fn init() {
+pub fn init(filter: &str) {
     INIT.get_or_init(|| {
-        let filter = EnvFilter::try_from_default_env()
+        let filter = EnvFilter::try_new(filter)
             .unwrap_or_else(|_| EnvFilter::new("info,sage_wiki_bridge=debug"));
 
         tracing_subscriber::registry()
