@@ -198,11 +198,18 @@ fn build_media_processor(
         config.http_timeout,
     )?;
 
-    Ok(Arc::new(GeminiMediaJobProcessor::new(
-        media_client,
-        Arc::new(gemini_client),
-        &config.raw_archive_dir,
-    )))
+    Ok(Arc::new(
+        GeminiMediaJobProcessor::new(
+            media_client,
+            Arc::new(gemini_client),
+            &config.raw_archive_dir,
+        )
+        .with_prompts(
+            config.llm_image_system_prompt.clone(),
+            config.llm_voice_system_prompt.clone(),
+            config.llm_video_system_prompt.clone(),
+        ),
+    ))
 }
 
 fn build_oauth_client(

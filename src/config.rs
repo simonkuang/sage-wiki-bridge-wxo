@@ -65,6 +65,9 @@ pub struct AppConfig {
     pub gemini_endpoint_base: String,
     pub gemini_model: String,
     pub gemini_max_inline_bytes: u64,
+    pub llm_image_system_prompt: String,
+    pub llm_voice_system_prompt: String,
+    pub llm_video_system_prompt: String,
     pub tencent_lbs_endpoint: String,
     pub tencent_lbs_get_poi: bool,
     pub tencent_lbs_radius_meters: Option<u32>,
@@ -125,6 +128,21 @@ impl AppConfig {
             ),
             gemini_model: get_string(&lookup, "GEMINI_MODEL", "gemini-2.5-flash"),
             gemini_max_inline_bytes: get_u64(&lookup, "GEMINI_MAX_INLINE_BYTES", 18 * 1024 * 1024)?,
+            llm_image_system_prompt: get_string(
+                &lookup,
+                "LLM_IMAGE_SYSTEM_PROMPT",
+                "Describe this image for a personal knowledge base.",
+            ),
+            llm_voice_system_prompt: get_string(
+                &lookup,
+                "LLM_VOICE_SYSTEM_PROMPT",
+                "Transcribe and summarize this voice message.",
+            ),
+            llm_video_system_prompt: get_string(
+                &lookup,
+                "LLM_VIDEO_SYSTEM_PROMPT",
+                "Summarize this video for a personal knowledge base.",
+            ),
             tencent_lbs_endpoint: get_string(
                 &lookup,
                 "TENCENT_LBS_ENDPOINT",
@@ -241,6 +259,7 @@ mod tests {
             ("HONEYPOT_REPLY_TEXT", "收到"),
             ("WORKER_INTERVAL_MS", "250"),
             ("WORKER_PROCESSING_TIMEOUT_SECONDS", "120"),
+            ("LLM_IMAGE_SYSTEM_PROMPT", "看图总结"),
             ("TENCENT_LBS_RADIUS_METERS", "500"),
         ])
         .unwrap();
@@ -252,6 +271,7 @@ mod tests {
         assert_eq!(config.honeypot_reply_text, "收到");
         assert_eq!(config.worker_interval, Duration::from_millis(250));
         assert_eq!(config.worker_processing_timeout, Duration::from_secs(120));
+        assert_eq!(config.llm_image_system_prompt, "看图总结");
         assert_eq!(config.tencent_lbs_radius_meters, Some(500));
     }
 

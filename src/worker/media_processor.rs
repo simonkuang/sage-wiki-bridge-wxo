@@ -42,6 +42,18 @@ impl GeminiMediaJobProcessor {
             video_prompt: "Summarize this video for a personal knowledge base.".to_string(),
         }
     }
+
+    pub fn with_prompts(
+        mut self,
+        image_prompt: impl Into<String>,
+        voice_prompt: impl Into<String>,
+        video_prompt: impl Into<String>,
+    ) -> Self {
+        self.image_prompt = image_prompt.into();
+        self.voice_prompt = voice_prompt.into();
+        self.video_prompt = video_prompt.into();
+        self
+    }
 }
 
 impl MediaJobProcessor for GeminiMediaJobProcessor {
@@ -166,6 +178,7 @@ mod tests {
         ) -> LlmFuture<'a, LlmOutput> {
             Box::pin(async move {
                 assert_eq!(request.mime_type, "image/jpeg");
+                assert_eq!(request.system_prompt, "describe image for test");
                 Ok(LlmOutput {
                     provider: "gemini".to_string(),
                     model: "gemini-test".to_string(),
@@ -234,6 +247,11 @@ mod tests {
             .unwrap(),
             Arc::new(FakeLlmProvider),
             raw_root.path(),
+        )
+        .with_prompts(
+            "describe image for test",
+            "transcribe voice for test",
+            "summarize video for test",
         );
 
         let artifact = processor
