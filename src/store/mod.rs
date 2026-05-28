@@ -172,6 +172,7 @@ impl Store {
         .execute(&self.pool)
         .await
         .map_err(|err| BridgeError::Database(err.to_string()))?;
+
         Ok(())
     }
 
@@ -407,6 +408,7 @@ impl Store {
         .execute(&self.pool)
         .await
         .map_err(|err| BridgeError::Database(err.to_string()))?;
+
         Ok(())
     }
 
@@ -471,6 +473,27 @@ impl Store {
         .bind(job_id)
         .bind(error)
         .bind(next_run_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET status = 'failed',
+                error_kind = 'worker',
+                error_message = ?2,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = (
+                SELECT message_id
+                FROM jobs
+                WHERE id = ?1
+                  AND status = 'failed'
+            )
+            "#,
+        )
+        .bind(job_id)
+        .bind(error)
         .execute(&self.pool)
         .await
         .map_err(|err| BridgeError::Database(err.to_string()))?;
@@ -877,6 +900,19 @@ mod tests {
             "2026-05-27T21:30:15+08:00"
         );
         assert_eq!(row.get::<String, _>("last_error"), "permanent failure");
+
+        let message_row =
+            sqlx::query("SELECT status, error_kind, error_message FROM messages WHERE id = ?1")
+                .bind(message_id)
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(message_row.get::<String, _>("status"), "failed");
+        assert_eq!(message_row.get::<String, _>("error_kind"), "worker");
+        assert_eq!(
+            message_row.get::<String, _>("error_message"),
+            "permanent failure"
+        );
     }
 
     #[tokio::test]
