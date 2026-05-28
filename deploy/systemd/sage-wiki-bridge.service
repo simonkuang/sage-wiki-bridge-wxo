@@ -1,0 +1,27 @@
+[Unit]
+Description=sage-wiki WeChat Official Account bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sagewiki
+Group=sagewiki
+WorkingDirectory=/opt/sage-wiki-bridge
+EnvironmentFile=/etc/sage-wiki-bridge.env
+ExecStart=/opt/sage-wiki-bridge/bin/sage-wiki-bridge
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/sage-wiki-bridge/data /opt/sage-wiki/source
+
+MemoryAccounting=true
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
