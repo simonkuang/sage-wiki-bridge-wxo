@@ -245,6 +245,20 @@ impl Worker {
         }
         Ok(())
     }
+
+    fn save_named_processed_payload(
+        &self,
+        message: &StoredMessage,
+        filename: &str,
+        bytes: &[u8],
+    ) -> Result<Option<PathBuf>, BridgeError> {
+        let Some(store) = &self.processed_artifact_store else {
+            return Ok(None);
+        };
+        let record = store.save_artifact(&message_key(message), filename, bytes)?;
+        Ok(record.path)
+    }
+
     async fn artifact_from_stored_message(
         &self,
         message: &StoredMessage,
@@ -267,6 +281,11 @@ impl Worker {
                     .reverse_geocode(latitude, longitude)
                     .await?;
                 let summary = extract_location_summary(&json)?;
+                let raw_json_path = self.save_named_processed_payload(
+                    message,
+                    "tencent-lbs.json",
+                    json.as_bytes(),
+                )?;
                 let location = LocationMessage {
                     common: common_from_stored_message(message),
                     latitude,
@@ -274,7 +293,7 @@ impl Worker {
                     scale: message.location_scale,
                     label: message.location_label.clone(),
                 };
-                Ok(process_location(&location, &summary, None))
+                Ok(process_location(&location, &summary, raw_json_path))
             }
             "link" => {
                 let url = message.link_url.as_deref().ok_or_else(|| {
@@ -626,13 +645,15 @@ mod tests {
     async fn worker_processes_location_job_to_source() {
         let store = store_with_job(location_message()).await;
         let source_dir = tempfile::tempdir().unwrap();
+        let processed_dir = tempfile::tempdir().unwrap();
         let worker = Worker::with_external_clients(
             store,
             SourceWriter::new(source_dir.path()),
             Arc::new(FakeExternalClients),
             "worker-1",
             "0.1.0",
-        );
+        )
+        .with_processed_artifact_store(ProcessedArtifactStore::new(processed_dir.path()));
 
         let outcome = worker
             .process_next("2026-05-27T21:30:16+08:00")
@@ -645,6 +666,14 @@ mod tests {
         let source = std::fs::read_to_string(source_path).unwrap();
         assert!(source.contains("Adcode: 440106"));
         assert!(source.contains("Coordinates: 23.134521, 113.358803"));
+        let lbs_json = std::fs::read_to_string(
+            processed_dir
+                .path()
+                .join("msg_location_1")
+                .join("tencent-lbs.json"),
+        )
+        .unwrap();
+        assert!(lbs_json.contains("\"adcode\": \"440106\""));
     }
 
     #[tokio::test]
