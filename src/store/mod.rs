@@ -1,4 +1,8 @@
-use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::{
+    Row, SqlitePool,
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+};
+use std::str::FromStr;
 
 use crate::error::BridgeError;
 
@@ -129,10 +133,13 @@ pub struct MessageDetail {
 
 impl Store {
     pub async fn connect(database_url: &str) -> Result<Self, BridgeError> {
+        let options = SqliteConnectOptions::from_str(database_url)
+            .map_err(|err| BridgeError::Database(err.to_string()))?
+            .create_if_missing(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(4)
             .min_connections(1)
-            .connect(database_url)
+            .connect_with(options)
             .await
             .map_err(|err| BridgeError::Database(err.to_string()))?;
         Ok(Self { pool })
@@ -641,6 +648,18 @@ mod tests {
         let store = Store::connect("sqlite::memory:").await.unwrap();
         store.migrate().await.unwrap();
         store
+    }
+
+    #[tokio::test]
+    async fn connect_creates_missing_database_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("bridge.sqlite3");
+        let database_url = format!("sqlite://{}", db_path.display());
+
+        let store = Store::connect(&database_url).await.unwrap();
+        store.migrate().await.unwrap();
+
+        assert!(db_path.exists());
     }
 
     fn message(msg_id: &str) -> MessageInsert {
