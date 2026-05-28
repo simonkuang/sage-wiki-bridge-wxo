@@ -38,19 +38,12 @@ const FLAG_SPECS: &[(&str, &str)] = &[
     ("--healthz-path", "HEALTHZ_PATH"),
     ("--readyz-path", "READYZ_PATH"),
     ("--wechat-api-base", "WECHAT_API_BASE"),
-    (
-        "--wechat-oauth-authorize-base",
-        "WECHAT_OAUTH_AUTHORIZE_BASE",
-    ),
     ("--max-media-bytes", "MAX_MEDIA_BYTES"),
     (
         "--wechat-token-refresh-skew-seconds",
         "WECHAT_TOKEN_REFRESH_SKEW_SECONDS",
     ),
-    (
-        "--whitelist-join-redirect-url",
-        "WHITELIST_JOIN_REDIRECT_URL",
-    ),
+    ("--whitelist-join-command", "WHITELIST_JOIN_COMMAND"),
     ("--gemini-endpoint-base", "GEMINI_ENDPOINT_BASE"),
     ("--gemini-model", "GEMINI_MODEL"),
     ("--gemini-max-inline-bytes", "GEMINI_MAX_INLINE_BYTES"),
@@ -69,7 +62,6 @@ const FLAG_SPECS: &[(&str, &str)] = &[
     ("--wechat-encoding-aes-key", "WECHAT_ENCODING_AES_KEY"),
     ("--admin-view-key", "ADMIN_VIEW_KEY"),
     ("--admin-base-path", "ADMIN_BASE_PATH"),
-    ("--whitelist-join-key", "WHITELIST_JOIN_KEY"),
     ("--gemini-api-key", "GEMINI_API_KEY"),
     ("--openai-api-key", "OPENAI_API_KEY"),
     ("--anthropic-api-key", "ANTHROPIC_API_KEY"),
@@ -140,8 +132,6 @@ WeChat:
       Default: false
   --wechat-api-base VALUE
       Default: https://api.weixin.qq.com
-  --wechat-oauth-authorize-base VALUE
-      Default: https://open.weixin.qq.com/connect/oauth2/authorize
   --wechat-admin-openids VALUE
       Default: empty list
   --wechat-token-refresh-skew-seconds VALUE
@@ -152,10 +142,8 @@ Admin:
       Default: /admin
   --admin-view-key VALUE
       Default: none.
-  --whitelist-join-key VALUE
-      Default: none.
-  --whitelist-join-redirect-url VALUE
-      Default: empty.
+  --whitelist-join-command VALUE
+      Default: empty. When set, an exact text message match adds the sender OpenID to the whitelist.
   --admin-default-per-page VALUE
       Default: 20
   --admin-max-per-page VALUE
@@ -373,7 +361,6 @@ pub struct EnvSecrets {
     pub wechat_token: Option<String>,
     pub wechat_encoding_aes_key: Option<String>,
     pub admin_view_key: Option<String>,
-    pub whitelist_join_key: Option<String>,
     pub gemini_api_key: Option<String>,
     pub openai_api_key: Option<String>,
     pub anthropic_api_key: Option<String>,
@@ -397,7 +384,6 @@ impl EnvSecrets {
             wechat_token: get_optional_from_lookup(&lookup, "WECHAT_TOKEN"),
             wechat_encoding_aes_key: get_optional_from_lookup(&lookup, "WECHAT_ENCODING_AES_KEY"),
             admin_view_key: get_optional_from_lookup(&lookup, "ADMIN_VIEW_KEY"),
-            whitelist_join_key: get_optional_from_lookup(&lookup, "WHITELIST_JOIN_KEY"),
             gemini_api_key: get_optional_from_lookup(&lookup, "GEMINI_API_KEY"),
             openai_api_key: get_optional_from_lookup(&lookup, "OPENAI_API_KEY"),
             anthropic_api_key: get_optional_from_lookup(&lookup, "ANTHROPIC_API_KEY"),
@@ -468,10 +454,9 @@ pub struct AppConfig {
     pub healthz_path: String,
     pub readyz_path: String,
     pub wechat_api_base: String,
-    pub wechat_oauth_authorize_base: String,
     pub max_media_bytes: u64,
     pub wechat_token_refresh_skew: Duration,
-    pub whitelist_join_redirect_url: Option<String>,
+    pub whitelist_join_command: Option<String>,
     pub gemini_endpoint_base: String,
     pub gemini_model: String,
     pub gemini_max_inline_bytes: u64,
@@ -546,21 +531,13 @@ impl AppConfig {
             healthz_path: get_string(&lookup, "HEALTHZ_PATH", "/healthz"),
             readyz_path: get_string(&lookup, "READYZ_PATH", "/readyz"),
             wechat_api_base: get_string(&lookup, "WECHAT_API_BASE", "https://api.weixin.qq.com"),
-            wechat_oauth_authorize_base: get_string(
-                &lookup,
-                "WECHAT_OAUTH_AUTHORIZE_BASE",
-                "https://open.weixin.qq.com/connect/oauth2/authorize",
-            ),
             max_media_bytes: get_u64(&lookup, "MAX_MEDIA_BYTES", 20 * 1024 * 1024)?,
             wechat_token_refresh_skew: Duration::from_secs(get_u64(
                 &lookup,
                 "WECHAT_TOKEN_REFRESH_SKEW_SECONDS",
                 300,
             )?),
-            whitelist_join_redirect_url: get_optional_string(
-                &lookup,
-                "WHITELIST_JOIN_REDIRECT_URL",
-            ),
+            whitelist_join_command: get_optional_string(&lookup, "WHITELIST_JOIN_COMMAND"),
             gemini_endpoint_base: get_string(
                 &lookup,
                 "GEMINI_ENDPOINT_BASE",
@@ -756,11 +733,10 @@ mod tests {
         let help = CliConfig::help_text();
 
         assert!(help.contains("--bind-addr VALUE\n      Default: 127.0.0.1:8080"));
-        assert!(
-            help.contains("--database-url VALUE\n      Default: sqlite://data/bridge.sqlite3")
-        );
+        assert!(help.contains("--database-url VALUE\n      Default: sqlite://data/bridge.sqlite3"));
         assert!(help.contains("--worker-enabled true|false\n      Default: true"));
         assert!(help.contains("--wechat-token VALUE\n      Default: none."));
+        assert!(help.contains("--whitelist-join-command VALUE\n      Default: empty."));
         assert!(help.contains(&format!(
             "--bridge-version VALUE\n      Default: {}",
             env!("CARGO_PKG_VERSION")
@@ -782,6 +758,7 @@ mod tests {
         assert!(!config.encrypted_callback_enabled);
         assert!(!config.honeypot_reply_enabled);
         assert_eq!(config.honeypot_reply_text, "Message received.");
+        assert_eq!(config.whitelist_join_command, None);
         assert!(config.worker_enabled);
         assert_eq!(config.worker_interval, Duration::from_millis(1000));
         assert_eq!(
@@ -801,6 +778,7 @@ mod tests {
             ("HONEYPOT_REPLY_TEXT", "收到"),
             ("WORKER_INTERVAL_MS", "250"),
             ("WORKER_PROCESSING_TIMEOUT_SECONDS", "120"),
+            ("WHITELIST_JOIN_COMMAND", "/sage-wiki-join"),
             ("LLM_IMAGE_SYSTEM_PROMPT", "看图总结"),
             ("TENCENT_LBS_RADIUS_METERS", "500"),
         ])
@@ -813,6 +791,10 @@ mod tests {
         assert_eq!(config.honeypot_reply_text, "收到");
         assert_eq!(config.worker_interval, Duration::from_millis(250));
         assert_eq!(config.worker_processing_timeout, Duration::from_secs(120));
+        assert_eq!(
+            config.whitelist_join_command.as_deref(),
+            Some("/sage-wiki-join")
+        );
         assert_eq!(config.llm_image_system_prompt, "看图总结");
         assert_eq!(config.tencent_lbs_radius_meters, Some(500));
     }

@@ -337,7 +337,7 @@ MVP 使用 OpenID 白名单:
 
 - `openid`: 明文保存于 SQLite, 仅服务内部使用。
 - `openid_hash`: 日志和 UI 默认展示。
-- `unionid`: 如果 OAuth 返回则保存, 不作为必要条件。
+- `unionid`: 不作为必要条件。未认证订阅号网页授权不可用, 不依赖 OAuth 获取用户身份。
 
 白名单未命中时:
 
@@ -346,27 +346,22 @@ MVP 使用 OpenID 白名单:
 - 不写 source。
 - 可按配置保存有限审计信息。
 
-### 6.12 微信内绑定
+### 6.12 微信内白名单加入
 
-管理员生成或配置绑定链接:
+未认证订阅号没有网页授权能力, 前端 JS-SDK 也不能直接获取 openid。因此白名单加入不走网页 OAuth, 改为 magic command:
 
-```text
-https://bridge.example.com/wx/bind?key=<join_key>
-```
-
-流程:
-
-1. 用户在微信内打开链接。
-2. 服务校验 `join_key`。
-3. 服务生成短期 `state`, 重定向到微信 OAuth `snsapi_base`。
-4. OAuth callback 用 code 换取 OpenID。
-5. 展示 OpenID/UnionID, 并加入白名单。
+1. 管理员通过 CLI 配置 `--whitelist-join-command`。
+2. 用户给公众号发送完全匹配该 command 的文本消息。
+3. receiver 从 callback XML 的 `FromUserName` 取得该用户在当前公众号下的 OpenID。
+4. 服务将该 OpenID upsert 到白名单, source 为 `wechat-magic-command`。
+5. command 消息入库留痕, 状态为 `whitelisted`, 不创建处理 job, 不写 sage-wiki source。
 
 设计理由:
 
-- 微信内点击链接无法方便设置 header, 第一跳 query key 是合理选择。
-- OAuth callback 不携带原始 key, 只携带签名 state。
-- 后台 API 不使用 query key, 使用 Authorization header 或 session cookie。
+- 订阅号 callback 本身可靠携带 OpenID。
+- 不依赖未认证订阅号不可用的网页授权。
+- 不需要把鉴权 key 放进微信内链接或前端页面。
+- magic command 通过 CLI 显式配置; 默认空值表示关闭自助加入。
 
 ### 6.13 蜜罐逻辑
 

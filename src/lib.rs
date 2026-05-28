@@ -33,7 +33,6 @@ use crate::{
     receiver::{ReceiverConfig, ReceiverState},
     source::SourceWriter,
     store::Store,
-    wechat::oauth::{WechatOAuthClient, WechatOAuthConfig},
     worker::{
         ExternalClients, MediaJobProcessor, NoopExternalClients, NoopMediaJobProcessor,
         RetryPolicy, WorkOutcome, Worker, media_processor::GeminiMediaJobProcessor,
@@ -104,6 +103,7 @@ pub async fn run_with_config(runtime_config: RuntimeConfig) -> Result<(), error:
             wechat_encoding_aes_key: secrets.wechat_encoding_aes_key.clone(),
             honeypot_reply_enabled: config.honeypot_reply_enabled,
             honeypot_reply_text: config.honeypot_reply_text.clone(),
+            whitelist_join_command: config.whitelist_join_command.clone(),
             request_body_limit_bytes: config.request_body_limit_bytes,
         },
         store: store.clone(),
@@ -113,9 +113,6 @@ pub async fn run_with_config(runtime_config: RuntimeConfig) -> Result<(), error:
         store: store.clone(),
         base_path: config.admin_base_path.clone(),
         view_key: secrets.admin_view_key.clone(),
-        whitelist_join_key: secrets.whitelist_join_key.clone(),
-        whitelist_join_redirect_url: config.whitelist_join_redirect_url.clone(),
-        oauth_client: build_oauth_client(&config, &secrets)?,
         default_per_page: config.admin_default_per_page,
         max_per_page: config.admin_max_per_page,
     }))
@@ -262,36 +259,6 @@ fn build_media_processor(
             config.llm_video_system_prompt.clone(),
         ),
     ))
-}
-
-fn build_oauth_client(
-    config: &AppConfig,
-    secrets: &EnvSecrets,
-) -> Result<Option<WechatOAuthClient>, BridgeError> {
-    let Some(app_id) = secrets
-        .wechat_app_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(None);
-    };
-    let Some(app_secret) = secrets
-        .wechat_app_secret
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(None);
-    };
-
-    Ok(Some(WechatOAuthClient::new(
-        WechatOAuthConfig {
-            app_id: app_id.to_string(),
-            app_secret: app_secret.to_string(),
-            api_base: config.wechat_api_base.clone(),
-            authorize_base: config.wechat_oauth_authorize_base.clone(),
-        },
-        config.http_timeout,
-    )?))
 }
 
 async fn run_worker_loop(

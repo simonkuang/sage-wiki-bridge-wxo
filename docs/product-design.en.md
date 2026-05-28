@@ -73,7 +73,7 @@ Other message and event types are accepted but marked unsupported or ignored.
 
 ## 5. Authentication and Whitelist
 
-OpenID is the MVP whitelist subject. UnionID is not assumed to be present. A configured list of admin OpenIDs can be seeded at startup. The admin join flow can expose an authorization path guarded by a configured key.
+OpenID is the MVP whitelist subject. UnionID is not assumed to be present. A configured list of admin OpenIDs can be seeded at startup. For subscription accounts without WeChat web authorization, whitelist self-join uses a configured magic text command sent to the Official Account; the receiver adds the callback `FromUserName` OpenID to the whitelist.
 
 Non-whitelisted messages are not processed by external services. Honeypot response behavior is configurable.
 
@@ -99,4 +99,3 @@ Non-whitelisted messages are not processed by external services. Honeypot respon
 - [中文 README](../README.zh-CN.md)
 - [English Technical Design](technical-design.en.md)
 - [中文产品设计](product-design.zh-CN.md)
-

@@ -1,6 +1,5 @@
 pub mod crypto;
 pub mod message;
-pub mod oauth;
 pub mod signature;
 pub mod types;
 

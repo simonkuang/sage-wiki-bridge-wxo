@@ -74,7 +74,6 @@ GEMINI_API_KEY=...
 TENCENT_LBS_KEY=...
 JINA_API_KEY=...
 ADMIN_VIEW_KEY=...
-WHITELIST_JOIN_KEY=...
 ```
 
 See [.env.example](.env.example) and [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example) for secrets-only env file examples. Runtime knobs should be passed as CLI flags, not duplicated in dotenv files. The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
@@ -91,8 +90,11 @@ cargo run --bin sage-wiki-bridge -- \
   --raw-archive-dir data/raw \
   --processed-artifact-dir data/processed \
   --sage-wiki-source-dir /path/to/sage-wiki/source \
-  --wechat-callback-path /wechat/callback
+  --wechat-callback-path /wechat/callback \
+  --whitelist-join-command /sage-wiki-join
 ```
+
+When `--whitelist-join-command` is set, a WeChat text message that exactly matches the command adds that sender's `FromUserName` OpenID to the whitelist. The command message is recorded but does not create a `sage-wiki` job.
 
 Health checks:
 
@@ -112,6 +114,7 @@ Before installing, review:
 - `--processed-artifact-dir`
 - `--sage-wiki-source-dir`
 - `--wechat-callback-path`
+- `--whitelist-join-command`
 - `ReadWritePaths`
 - `MemoryMax`
 

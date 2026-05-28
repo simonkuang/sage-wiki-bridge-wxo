@@ -34,10 +34,9 @@ ExecStart=/opt/sage-wiki-bridge/bin/sage-wiki-bridge \
   --healthz-path /healthz \
   --readyz-path /readyz \
   --wechat-api-base https://api.weixin.qq.com \
-  --wechat-oauth-authorize-base https://open.weixin.qq.com/connect/oauth2/authorize \
   --wechat-token-refresh-skew-seconds 300 \
   --admin-base-path /admin \
-  --whitelist-join-redirect-url "" \
+  --whitelist-join-command "" \
   --admin-default-per-page 20 \
   --admin-max-per-page 100 \
   --max-media-bytes 20971520 \

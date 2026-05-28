@@ -45,8 +45,8 @@ flowchart LR
 | Module | Responsibility |
 | --- | --- |
 | `config` | CLI/env-file/process-env merge, validation, runtime config. |
-| `receiver` | WeChat GET verification, POST callback, signature/decryption, whitelist routing. |
-| `wechat` | Message parsing, signature verification, OAuth, AES-CBC message crypto. |
+| `receiver` | WeChat GET verification, POST callback, signature/decryption, whitelist routing, magic-command whitelist join. |
+| `wechat` | Message parsing, signature verification, AES-CBC message crypto. |
 | `store` | SQLite connection, migrations, messages, jobs, whitelist, list/detail queries. |
 | `archive` | Raw payload metadata/full archive and processed artifact file writes. |
 | `worker` | Job claiming, preprocessing, retries, source write state transitions. |
@@ -54,7 +54,7 @@ flowchart LR
 | `llm` | Gemini media processing client and provider interface. |
 | `enrich` | Tencent LBS, Jina Reader, and HTTP safety checks. |
 | `source` | Atomic Markdown source generation. |
-| `admin` | Read-only message list/detail and whitelist join flow. |
+| `admin` | Read-only message list/detail and optional manual whitelist join. |
 | `health` | Health and readiness endpoints. |
 | `telemetry` | JSON structured logging. |
 
@@ -210,4 +210,3 @@ Use `/healthz` for liveness and `/readyz` for database readiness unless overridd
 - [中文 README](../README.zh-CN.md)
 - [English Product Design / PRD](product-design.en.md)
 - [中文技术设计](technical-design.zh-CN.md)
-

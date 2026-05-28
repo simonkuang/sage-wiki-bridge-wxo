@@ -32,6 +32,7 @@ pub struct ReceiverConfig {
     pub wechat_encoding_aes_key: Option<String>,
     pub honeypot_reply_enabled: bool,
     pub honeypot_reply_text: String,
+    pub whitelist_join_command: Option<String>,
     pub request_body_limit_bytes: usize,
 }
 
@@ -223,8 +224,12 @@ async fn process_plain_xml(
         .is_openid_whitelisted(common.from_user_name.as_str())
         .await?;
     let supported = message.is_supported();
+    let whitelist_join_requested =
+        is_whitelist_join_command(&message, state.config.whitelist_join_command.as_deref());
 
-    let status = if authorized && supported {
+    let status = if whitelist_join_requested {
+        "whitelisted"
+    } else if authorized && supported {
         "queued"
     } else {
         "ignored"
@@ -260,11 +265,31 @@ async fn process_plain_xml(
             link_title: link_title(&message),
             link_description: link_description(&message),
             link_url: link_url(&message),
-            authorized,
+            authorized: authorized || whitelist_join_requested,
             status: status.to_string(),
             raw_dir: raw_dir.to_string(),
         })
         .await?;
+
+    if whitelist_join_requested {
+        let openid_hash = OpenIdHash::sha256_for_display(&common.from_user_name).to_string();
+        state
+            .store
+            .upsert_whitelist(
+                common.from_user_name.as_str(),
+                &openid_hash,
+                "wechat-magic-command",
+            )
+            .await?;
+        tracing::info!(
+            component = "receiver",
+            message_id,
+            openid_hash = %OpenIdHash::sha256_for_display(&common.from_user_name),
+            encrypt_type = encrypt_type.unwrap_or("plain"),
+            "openid added to whitelist by magic command"
+        );
+        return Ok(None);
+    }
 
     if authorized && supported {
         state
@@ -303,6 +328,16 @@ fn passive_text_reply(to_user: &OpenId, from_user: &str, content: &str) -> Strin
 
 fn sanitize_cdata(value: &str) -> String {
     value.replace("]]>", "]]]]><![CDATA[>")
+}
+
+fn is_whitelist_join_command(message: &IncomingMessage, command: Option<&str>) -> bool {
+    let Some(command) = command.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    matches!(
+        message,
+        IncomingMessage::Text(text) if text.content.trim() == command
+    )
 }
 
 fn media_id(message: &IncomingMessage) -> Option<String> {
@@ -448,6 +483,7 @@ mod tests {
                 wechat_encoding_aes_key: None,
                 honeypot_reply_enabled: false,
                 honeypot_reply_text: "Message received.".to_string(),
+                whitelist_join_command: None,
                 request_body_limit_bytes: 2 * 1024 * 1024,
             },
             store,
@@ -586,6 +622,41 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(message_status, "ignored");
+    }
+
+    #[tokio::test]
+    async fn post_callback_magic_command_whitelists_sender_without_job() {
+        let mut state = test_state(false).await;
+        state.config.whitelist_join_command = Some("/sage-wiki-join".to_string());
+        let store = state.store.clone();
+        let xml = include_str!("../../tests/fixtures/wechat/text.xml")
+            .replace("openid-user-1", "openid-new-admin")
+            .replace("把这条知识存进 sage-wiki", " /sage-wiki-join ");
+
+        let status = post_fixture(state, &xml).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            store
+                .is_openid_whitelisted("openid-new-admin")
+                .await
+                .unwrap()
+        );
+        let job_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(job_count, 0);
+        let message_status: String = sqlx::query_scalar("SELECT status FROM messages LIMIT 1")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(message_status, "whitelisted");
+        let authorized: bool = sqlx::query_scalar("SELECT authorized FROM messages LIMIT 1")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert!(authorized);
     }
 
     #[tokio::test]
