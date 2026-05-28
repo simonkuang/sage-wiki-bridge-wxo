@@ -5,8 +5,10 @@ edition = "2024"
 rust-version = "1.95"
 
 [dependencies]
+aes = "0.8"
 axum = "0.8"
 base64 = "0.22"
+cbc = { version = "0.1", features = ["alloc"] }
 constant_time_eq = "0.3"
 dotenvy = "0.15"
 quick-xml = { version = "0.38", features = ["serialize"] }
