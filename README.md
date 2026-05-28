@@ -77,7 +77,7 @@ ADMIN_VIEW_KEY=...
 WHITELIST_JOIN_KEY=...
 ```
 
-See [.env.example](.env.example) and [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example). The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
+See [.env.example](.env.example) and [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example) for secrets-only env file examples. Runtime knobs should be passed as CLI flags, not duplicated in dotenv files. The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
 
 ## Run
 
@@ -163,7 +163,7 @@ The product-level flow is explained in [the PRD](docs/product-design.en.md). The
 - [Technical Design](docs/technical-design.en.md): architecture, modules, data model, logging, disaster recovery, deployment, and testing strategy.
 - [中文 README](README.zh-CN.md): Chinese project entry.
 - [Systemd Deployment Notes](deploy/systemd/README.md): Linux service installation outline.
-- [.env.example](.env.example): complete example config keys for local runs.
+- [.env.example](.env.example): secrets and environment-bound identifiers for explicit `--env-file` loading.
 
 ## Current Status
 

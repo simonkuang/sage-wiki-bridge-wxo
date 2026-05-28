@@ -35,6 +35,6 @@ The binary does not load `.env` implicitly. Config sources must be enabled expli
 /opt/sage-wiki-bridge/bin/sage-wiki-bridge --env-file /etc/sage-wiki-bridge.env
 ```
 
-Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit keeps operational startup settings in `ExecStart` flags and keeps secrets in `/etc/sage-wiki-bridge.env`.
+Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit keeps operational startup settings in `ExecStart` flags and keeps secrets in `/etc/sage-wiki-bridge.env`. Avoid defining the same key in both places unless you intentionally want the CLI flag to override the env file.
 
 The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `SAGE_WIKI_SOURCE_DIR` differs, update `ReadWritePaths` before starting.

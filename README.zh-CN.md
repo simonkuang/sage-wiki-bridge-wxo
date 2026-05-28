@@ -77,7 +77,7 @@ ADMIN_VIEW_KEY=...
 WHITELIST_JOIN_KEY=...
 ```
 
-参考 [.env.example](.env.example) 和 [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example)。完整配置模型见 [技术设计](docs/technical-design.zh-CN.md)。
+参考 [.env.example](.env.example) 和 [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example)，这两个文件只放 secrets 和环境强相关标识。运行参数应通过 CLI flags 传递，不要在 dotenv 中重复配置。完整配置模型见 [技术设计](docs/technical-design.zh-CN.md)。
 
 ## 运行
 
@@ -162,10 +162,9 @@ sequenceDiagram
 - [产品设计 / PRD](docs/product-design.zh-CN.md): 背景、用户、目标、消息处理范围和产品决策。
 - [技术设计](docs/technical-design.zh-CN.md): 架构、模块、数据模型、日志、灾备、部署和测试策略。
 - [Systemd 部署说明](deploy/systemd/README.md): Linux service 安装流程。
-- [.env.example](.env.example): 本地运行时完整配置 key 示例。
+- [.env.example](.env.example): 显式 `--env-file` 加载的 secrets 和环境强相关标识示例。
 - [English README](README.md): 英文项目入口。
 
 ## 当前状态
 
 项目已实现核心 bridge、worker、storage、admin、加密 callback 和显式配置模型。Rust 全量测试通过，真实微信公众号 callback records 已在本地回放验证。
-
