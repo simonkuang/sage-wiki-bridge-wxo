@@ -29,4 +29,6 @@ sudo systemctl restart sage-wiki-bridge
 sudo journalctl -u sage-wiki-bridge -f
 ```
 
+For manual binary runs, either run from a directory containing `.env`, place `.env` next to the binary, or set `SAGE_WIKI_BRIDGE_ENV_FILE=/etc/sage-wiki-bridge.env`.
+
 The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `SAGE_WIKI_SOURCE_DIR` differs, update `ReadWritePaths` before starting.
