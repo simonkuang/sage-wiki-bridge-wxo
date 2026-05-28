@@ -1,12 +1,14 @@
 # sage-wiki-bridge
 
+Language: English | [中文](README.zh-CN.md)
+
 `sage-wiki-bridge` is a lightweight Rust service that receives WeChat Official Account callbacks, normalizes incoming messages, and writes Markdown source files for `sage-wiki compile --watch`.
 
 ## 5W1H
 
 **What:** A bridge from WeChat Official Account messages to a local `sage-wiki` source directory. It accepts text, image, voice, video, short video, location, and link messages, then queues authorized messages for enrichment and source generation.
 
-**Why:** `sage-wiki` can incrementally compile local source files, but WeChat is a low-friction capture surface. This service connects the two while preserving raw inputs and keeping callback handling fast. See the [product design](docs/product-design.md) for goals, user journeys, and product constraints.
+**Why:** `sage-wiki` can incrementally compile local source files, but WeChat is a low-friction capture surface. This service connects the two while preserving raw inputs and keeping callback handling fast. See the [product design](docs/product-design.en.md) for goals, user journeys, and product constraints.
 
 **Who:** It is for operators who run a private `sage-wiki` instance and want whitelisted WeChat users to submit knowledge into it. Non-whitelisted users are ignored or handled by configurable honeypot behavior.
 
@@ -14,7 +16,7 @@
 
 **Where:** Deploy it as an independent process on the same VPS or host that can write to the configured `sage-wiki` source directory. It does not need to be a sibling project of `sage-wiki`.
 
-**How:** Configure explicit CLI flags, optionally load secrets from `--env-file`, expose the WeChat callback path through your reverse proxy, and let the worker write Markdown into the source directory. The detailed architecture is in the [technical design](docs/technical-design.md).
+**How:** Configure explicit CLI flags, optionally load secrets from `--env-file`, expose the WeChat callback path through your reverse proxy, and let the worker write Markdown into the source directory. The detailed architecture is in the [technical design](docs/technical-design.en.md).
 
 ## Features
 
@@ -26,7 +28,7 @@
 - Read-only admin message list and detail pages.
 - Explicit runtime configuration: `CLI flags > --env-file > --use-process-env > built-in defaults`.
 
-For product behavior and scope decisions, read [docs/product-design.md](docs/product-design.md). For module boundaries, data flow, schema, retry behavior, and operations details, read [docs/technical-design.md](docs/technical-design.md).
+For product behavior and scope decisions, read [docs/product-design.en.md](docs/product-design.en.md). For module boundaries, data flow, schema, retry behavior, and operations details, read [docs/technical-design.en.md](docs/technical-design.en.md).
 
 ## Build
 
@@ -75,7 +77,7 @@ ADMIN_VIEW_KEY=...
 WHITELIST_JOIN_KEY=...
 ```
 
-See [.env.example](.env.example) and [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example). The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.md).
+See [.env.example](.env.example) and [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example). The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
 
 ## Run
 
@@ -113,7 +115,7 @@ Before installing, review:
 - `ReadWritePaths`
 - `MemoryMax`
 
-The deployment model and recovery expectations are covered in [docs/technical-design.md](docs/technical-design.md).
+The deployment model and recovery expectations are covered in [docs/technical-design.en.md](docs/technical-design.en.md).
 
 ## Testing
 
@@ -153,16 +155,16 @@ sequenceDiagram
   Worker->>DB: source_written or retry
 ```
 
-The product-level flow is explained in [the PRD](docs/product-design.md). The implementation-level component split is explained in [the technical design](docs/technical-design.md).
+The product-level flow is explained in [the PRD](docs/product-design.en.md). The implementation-level component split is explained in [the technical design](docs/technical-design.en.md).
 
 ## Documentation
 
-- [Product Design / PRD](docs/product-design.md): background, users, goals, message handling scope, and product decisions.
-- [Technical Design](docs/technical-design.md): architecture, modules, data model, logging, disaster recovery, deployment, and testing strategy.
+- [Product Design / PRD](docs/product-design.en.md): background, users, goals, message handling scope, and product decisions.
+- [Technical Design](docs/technical-design.en.md): architecture, modules, data model, logging, disaster recovery, deployment, and testing strategy.
+- [中文 README](README.zh-CN.md): Chinese project entry.
 - [Systemd Deployment Notes](deploy/systemd/README.md): Linux service installation outline.
 - [.env.example](.env.example): complete example config keys for local runs.
 
 ## Current Status
 
 The project has implemented the core bridge, worker, storage, admin, encrypted callback, and explicit configuration model. The full Rust test suite passes, and recorded WeChat callback replay has been validated locally.
-
