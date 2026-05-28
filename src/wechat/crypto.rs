@@ -5,7 +5,7 @@ use base64::{
 };
 use cbc::{
     Decryptor, Encryptor,
-    cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::Pkcs7},
+    cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::NoPadding},
 };
 use quick_xml::de::from_str;
 use serde::Deserialize;
@@ -122,9 +122,10 @@ fn decrypt_payload(key: &[u8; 32], encrypted_payload: &str) -> Result<Vec<u8>, B
     let encrypted = STANDARD
         .decode(encrypted_payload)
         .map_err(|err| BridgeError::ExternalPayloadInvalid(err.to_string()))?;
-    Aes256CbcDecryptor::new(key.into(), (&key[..16]).into())
-        .decrypt_padded_vec_mut::<Pkcs7>(&encrypted)
-        .map_err(|err| BridgeError::ExternalPayloadInvalid(format!("decrypt failed: {err}")))
+    let decrypted = Aes256CbcDecryptor::new(key.into(), (&key[..16]).into())
+        .decrypt_padded_vec_mut::<NoPadding>(&encrypted)
+        .map_err(|err| BridgeError::ExternalPayloadInvalid(format!("decrypt failed: {err}")))?;
+    remove_wechat_pkcs7_padding(&decrypted)
 }
 
 fn encrypt_payload(key: &[u8; 32], xml: &str, app_id: &str) -> Result<String, BridgeError> {
@@ -133,9 +134,40 @@ fn encrypt_payload(key: &[u8; 32], xml: &str, app_id: &str) -> Result<String, Br
     plaintext.extend_from_slice(&(xml.len() as u32).to_be_bytes());
     plaintext.extend_from_slice(xml.as_bytes());
     plaintext.extend_from_slice(app_id.as_bytes());
+    add_wechat_pkcs7_padding(&mut plaintext);
     let encrypted = Aes256CbcEncryptor::new(key.into(), (&key[..16]).into())
-        .encrypt_padded_vec_mut::<Pkcs7>(&plaintext);
+        .encrypt_padded_vec_mut::<NoPadding>(&plaintext);
     Ok(STANDARD.encode(encrypted))
+}
+
+fn add_wechat_pkcs7_padding(plaintext: &mut Vec<u8>) {
+    const WECHAT_PKCS7_BLOCK_SIZE: usize = 32;
+    let padding = WECHAT_PKCS7_BLOCK_SIZE - (plaintext.len() % WECHAT_PKCS7_BLOCK_SIZE);
+    plaintext.extend(std::iter::repeat_n(padding as u8, padding));
+}
+
+fn remove_wechat_pkcs7_padding(decrypted: &[u8]) -> Result<Vec<u8>, BridgeError> {
+    let Some(&padding) = decrypted.last() else {
+        return Err(BridgeError::ExternalPayloadInvalid(
+            "decrypted payload is empty".to_string(),
+        ));
+    };
+    let padding = padding as usize;
+    if !(1..=32).contains(&padding) || decrypted.len() < padding {
+        return Err(BridgeError::ExternalPayloadInvalid(
+            "invalid wechat pkcs7 padding".to_string(),
+        ));
+    }
+    let padding_start = decrypted.len() - padding;
+    if decrypted[padding_start..]
+        .iter()
+        .any(|&byte| byte as usize != padding)
+    {
+        return Err(BridgeError::ExternalPayloadInvalid(
+            "invalid wechat pkcs7 padding bytes".to_string(),
+        ));
+    }
+    Ok(decrypted[..padding_start].to_vec())
 }
 
 fn split_plaintext(plaintext: &[u8]) -> Result<(String, String), BridgeError> {
@@ -205,6 +237,19 @@ mod tests {
         let decoded = decode_encoding_aes_key(&key).unwrap();
 
         assert_eq!(decoded.len(), 32);
+    }
+
+    #[test]
+    fn wechat_pkcs7_padding_allows_padding_larger_than_aes_block() {
+        let mut plaintext = b"payload-with-length-that-needs-large-padding".to_vec();
+        while plaintext.len() % 32 >= 16 {
+            plaintext.push(b'x');
+        }
+
+        add_wechat_pkcs7_padding(&mut plaintext);
+
+        assert!(*plaintext.last().unwrap() > 16);
+        assert!(remove_wechat_pkcs7_padding(&plaintext).is_ok());
     }
 
     #[test]
