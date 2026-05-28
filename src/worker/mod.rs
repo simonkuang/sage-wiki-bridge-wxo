@@ -15,6 +15,7 @@ use crate::{
     wechat::message::{CommonFields, LinkMessage, LocationMessage},
     wechat::{OpenId, UrlString, WechatMsgId},
 };
+use time::{Duration as TimeDuration, OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub type WorkerFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, BridgeError>> + Send + 'a>>;
 
@@ -151,7 +152,10 @@ impl Worker {
                 })
             }
             Err(err) => {
-                self.store.mark_job_failed(job.id, &err.to_string()).await?;
+                let next_run_at = next_retry_at(now, job.attempts);
+                self.store
+                    .mark_job_retry_or_failed(job.id, &err.to_string(), &next_run_at)
+                    .await?;
                 Err(err)
             }
         }
@@ -276,9 +280,24 @@ fn message_key(message: &StoredMessage) -> String {
         .unwrap_or_else(|| format!("message_{}", message.id))
 }
 
+fn next_retry_at(now: &str, attempts: i64) -> String {
+    let base = OffsetDateTime::parse(now, &Rfc3339).unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let delay_seconds = retry_delay_seconds(attempts);
+    (base + TimeDuration::seconds(delay_seconds))
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| now.to_string())
+}
+
+fn retry_delay_seconds(attempts: i64) -> i64 {
+    let exponent = attempts.saturating_sub(1).clamp(0, 5) as u32;
+    (10_i64 * 2_i64.pow(exponent)).min(300)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+
+    use sqlx::Row;
 
     use crate::store::MessageInsert;
 
@@ -474,6 +493,45 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(outcome, WorkOutcome::NoJob);
+    }
+
+    #[tokio::test]
+    async fn worker_requeues_failed_job_with_backoff() {
+        let store = store_with_job(location_message()).await;
+        let source_dir = tempfile::tempdir().unwrap();
+        let worker = Worker::new(
+            store.clone(),
+            SourceWriter::new(source_dir.path()),
+            "worker-1",
+            "0.1.0",
+        );
+
+        let err = worker
+            .process_next("2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, BridgeError::ExternalPayloadInvalid(_)));
+
+        let row = sqlx::query("SELECT status, attempts, next_run_at, last_error FROM jobs LIMIT 1")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("status"), "pending");
+        assert_eq!(row.get::<i64, _>("attempts"), 1);
+        assert_eq!(
+            row.get::<String, _>("next_run_at"),
+            "2026-05-27T21:30:26+08:00"
+        );
+        assert!(
+            row.get::<String, _>("last_error")
+                .contains("reverse geocode client not configured")
+        );
+
+        let outcome = worker
+            .process_next("2026-05-27T21:30:25+08:00")
+            .await
+            .unwrap();
         assert_eq!(outcome, WorkOutcome::NoJob);
     }
 

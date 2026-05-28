@@ -414,6 +414,39 @@ impl Store {
         Ok(())
     }
 
+    pub async fn mark_job_retry_or_failed(
+        &self,
+        job_id: i64,
+        error: &str,
+        next_run_at: &str,
+    ) -> Result<(), BridgeError> {
+        sqlx::query(
+            r#"
+            UPDATE jobs
+            SET status = CASE
+                    WHEN attempts < max_attempts THEN 'pending'
+                    ELSE 'failed'
+                END,
+                next_run_at = CASE
+                    WHEN attempts < max_attempts THEN ?3
+                    ELSE next_run_at
+                END,
+                locked_at = NULL,
+                locked_by = NULL,
+                last_error = ?2,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?1
+            "#,
+        )
+        .bind(job_id)
+        .bind(error)
+        .bind(next_run_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+        Ok(())
+    }
+
     pub async fn list_messages(
         &self,
         query: &MessageListQuery,
@@ -703,5 +736,78 @@ mod tests {
 
         assert_eq!(status, "source_written");
         assert_eq!(job_status, "done");
+    }
+
+    #[tokio::test]
+    async fn failed_job_is_requeued_until_max_attempts() {
+        let store = test_store().await;
+        let message_id = store
+            .insert_message_idempotent(&message("msg_1"))
+            .await
+            .unwrap();
+        let job_id = store
+            .create_job_once(message_id, "process_message", "2026-05-27T21:30:15+08:00")
+            .await
+            .unwrap();
+
+        store
+            .claim_next_job("worker-1", "2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap();
+        store
+            .mark_job_retry_or_failed(job_id, "temporary failure", "2026-05-27T21:30:26+08:00")
+            .await
+            .unwrap();
+
+        let row = sqlx::query(
+            "SELECT status, attempts, next_run_at, locked_by, last_error FROM jobs WHERE id = ?1",
+        )
+        .bind(job_id)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(row.get::<String, _>("status"), "pending");
+        assert_eq!(row.get::<i64, _>("attempts"), 1);
+        assert_eq!(
+            row.get::<String, _>("next_run_at"),
+            "2026-05-27T21:30:26+08:00"
+        );
+        assert_eq!(row.get::<Option<String>, _>("locked_by"), None);
+        assert_eq!(row.get::<String, _>("last_error"), "temporary failure");
+    }
+
+    #[tokio::test]
+    async fn failed_job_stays_failed_at_max_attempts() {
+        let store = test_store().await;
+        let message_id = store
+            .insert_message_idempotent(&message("msg_1"))
+            .await
+            .unwrap();
+        let job_id = store
+            .create_job_once(message_id, "process_message", "2026-05-27T21:30:15+08:00")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE jobs SET attempts = 3 WHERE id = ?1")
+            .bind(job_id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        store
+            .mark_job_retry_or_failed(job_id, "permanent failure", "2026-05-27T21:35:00+08:00")
+            .await
+            .unwrap();
+
+        let row = sqlx::query("SELECT status, next_run_at, last_error FROM jobs WHERE id = ?1")
+            .bind(job_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(row.get::<String, _>("status"), "failed");
+        assert_eq!(
+            row.get::<String, _>("next_run_at"),
+            "2026-05-27T21:30:15+08:00"
+        );
+        assert_eq!(row.get::<String, _>("last_error"), "permanent failure");
     }
 }
