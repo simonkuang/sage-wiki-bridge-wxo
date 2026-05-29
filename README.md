@@ -2,7 +2,7 @@
 
 Language: English | [中文](README.zh-CN.md)
 
-`sage-wiki-bridge` is a lightweight Rust service that receives WeChat Official Account callbacks, normalizes incoming messages, and writes Markdown source files for `sage-wiki compile --watch`.
+`sage-wiki-bridge` is a lightweight Rust service that receives WeChat Official Account callbacks, normalizes incoming messages, and writes daily Markdown source files for `sage-wiki compile --watch`.
 
 ## 5W1H
 
@@ -23,7 +23,7 @@ Language: English | [中文](README.zh-CN.md)
 - WeChat callback verification and encrypted callback handling.
 - Message parsing for text, image, voice, video, short video, location, and link messages.
 - OpenID whitelist with configurable honeypot behavior for non-whitelisted senders.
-- Raw archive, processed artifact storage, SQLite state, and atomic Markdown source writes.
+- Raw archive, processed artifact storage, SQLite state, and atomic daily Markdown source writes.
 - Gemini-backed media processing, Tencent LBS reverse geocoding, and Jina Reader link extraction.
 - Read-only admin message list and detail pages.
 - Explicit runtime configuration: `CLI flags > --env-file > --use-process-env > built-in defaults`.

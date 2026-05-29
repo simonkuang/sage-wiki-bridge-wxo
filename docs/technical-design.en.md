@@ -110,9 +110,9 @@ Filesystem stores:
 
 - raw archive under configured raw directory
 - processed artifacts under configured processed directory
-- final Markdown source under configured `sage-wiki` source directory
+- final daily Markdown source under configured `sage-wiki` source directory
 
-The source writer uses atomic write semantics to avoid `sage-wiki compile --watch` reading partial files.
+The source writer groups messages into `YYYY-MM-DD.md` files by `received_at` date. It uses hidden per-message markers to upsert entries idempotently, and atomic write semantics to avoid `sage-wiki compile --watch` reading partial files.
 
 ## 8. Runtime Configuration
 

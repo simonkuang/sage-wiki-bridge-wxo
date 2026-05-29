@@ -6,6 +6,13 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-29
+
+### Changed
+
+- Source Markdown output is now grouped into one file per received date, using `YYYY-MM-DD.md` under the configured `sage-wiki` source directory.
+- Daily source files upsert message sections by hidden message markers so worker retries do not duplicate the same message entry.
+
 ## [0.1.0] - 2026-05-29
 
 ### Added

@@ -2,7 +2,7 @@
 
 语言: [English](README.md) | 中文
 
-`sage-wiki-bridge` 是一个轻量 Rust 服务，用于接收微信公众号 callback，解析并处理用户消息，然后把结果写入 `sage-wiki compile --watch` 监听的 Markdown source 目录。
+`sage-wiki-bridge` 是一个轻量 Rust 服务，用于接收微信公众号 callback，解析并处理用户消息，然后按天写入 `sage-wiki compile --watch` 监听的 Markdown source 文件。
 
 ## 5W1H
 
@@ -23,7 +23,7 @@
 - 微信 callback 接入验证、普通明文 callback、加密 callback。
 - 解析 text、image、voice、video、shortvideo、location、link。
 - OpenID 白名单和非白名单蜜罐逻辑。
-- raw archive、processed artifact、SQLite 状态和原子 Markdown source 写入。
+- raw archive、processed artifact、SQLite 状态和按天聚合的原子 Markdown source 写入。
 - Gemini 媒体理解、腾讯 LBS 逆地址解析、Jina Reader 链接读取。
 - 只读后台列表页和详情页。
 - 显式运行配置: `CLI flags > --env-file > --use-process-env > built-in defaults`。

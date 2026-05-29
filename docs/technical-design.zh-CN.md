@@ -796,7 +796,7 @@ flowchart LR
 - SQLite: 存消息索引、状态、任务、白名单、session、payload 路径和错误摘要。
 - `data/raw`: 存 callback XML、message JSON、媒体原文件、外部服务原始响应。
 - `data/processed`: 存 pre-processor 产物, 包括 LLM 文本、ASR 转写、LBS 摘要、Jina Markdown、source draft。
-- sage-wiki source 目录: 只存最终 Markdown source。
+- sage-wiki source 目录: 只存最终 Markdown source, 按 `received_at` 日期写入 `YYYY-MM-DD.md`。
 - 默认不自动删除 raw/processed 数据。后续可增加 retention policy, 但 MVP 先保证可审计和可恢复。
 
 ### 7.9 缓存设计
