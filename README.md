@@ -175,6 +175,7 @@ The product-level flow is explained in [the PRD](docs/product-design.en.md). The
 
 - [Product Design / PRD](docs/product-design.en.md): background, users, goals, message handling scope, and product decisions.
 - [Technical Design](docs/technical-design.en.md): architecture, modules, data model, logging, disaster recovery, deployment, and testing strategy.
+- [Changelog](CHANGELOG.md): notable changes and version history.
 - [中文 README](README.zh-CN.md): Chinese project entry.
 - [Systemd Deployment Notes](deploy/systemd/README.md): Linux service installation outline.
 - [.env.example](.env.example): secrets and environment-bound identifiers for explicit `--env-file` loading.

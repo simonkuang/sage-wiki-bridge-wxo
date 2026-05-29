@@ -175,6 +175,7 @@ sequenceDiagram
 
 - [产品设计 / PRD](docs/product-design.zh-CN.md): 背景、用户、目标、消息处理范围和产品决策。
 - [技术设计](docs/technical-design.zh-CN.md): 架构、模块、数据模型、日志、灾备、部署和测试策略。
+- [Changelog](CHANGELOG.md): 重要变更和版本历史。
 - [Systemd 部署说明](deploy/systemd/README.md): Linux service 安装流程。
 - [.env.example](.env.example): 显式 `--env-file` 加载的 secrets 和环境强相关标识示例。
 - [English README](README.md): 英文项目入口。
