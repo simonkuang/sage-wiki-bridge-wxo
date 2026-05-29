@@ -3,7 +3,7 @@ set -eu
 
 PID_FILE="${PID_FILE:-./tmp/sage-wiki-bridge.pid}"
 LOG_FILE="${LOG_FILE:-./logs/sage-wiki-bridge.log}"
-ENV_FILE="${ENV_FILE:-${BRIDGE_CONFIG_ENV_FILE:-}}"
+ENV_FILE="${ENV_FILE:-${BRIDGE_CONFIG_ENV_FILE:-/data/workspace/sage-wiki-bridge-wxo/.env}}"
 
 if [ -f "$PID_FILE" ]; then
   old_pid="$(cat "$PID_FILE")"

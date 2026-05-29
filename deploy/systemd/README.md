@@ -3,44 +3,47 @@
 Example layout:
 
 ```sh
-/opt/sage-wiki-bridge/bin/sage-wiki-bridge
-/opt/sage-wiki-bridge/scripts/bridgectl.sh
-/opt/sage-wiki-bridge/data/
-/etc/sage-wiki-bridge.env
+/usr/local/bin/sage-wiki-bridge
+/data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh
+/data/workspace/sage-wiki-bridge-wxo/data/
+/data/workspace/sage-wiki-bridge-wxo/.env
 /etc/systemd/system/sage-wiki-bridge.service
 ```
 
 Install outline:
 
 ```sh
-sudo useradd --system --home /opt/sage-wiki-bridge --shell /usr/sbin/nologin sagewiki
-sudo mkdir -p /opt/sage-wiki-bridge/bin /opt/sage-wiki-bridge/scripts /opt/sage-wiki-bridge/data
-sudo install -m 0755 target/release/sage-wiki-bridge /opt/sage-wiki-bridge/bin/sage-wiki-bridge
-sudo install -m 0755 scripts/bridgectl.sh /opt/sage-wiki-bridge/scripts/bridgectl.sh
-sudo install -m 0600 deploy/systemd/sage-wiki-bridge.env.example /etc/sage-wiki-bridge.env
+sudo useradd --system --home /data/workspace/sage-wiki-bridge-wxo --shell /usr/sbin/nologin sagewiki
+sudo mkdir -p /data/workspace/sage-wiki-bridge-wxo/scripts /data/workspace/sage-wiki-bridge-wxo/data
+sudo install -m 0755 target/release/sage-wiki-bridge /usr/local/bin/sage-wiki-bridge
+sudo install -m 0755 scripts/bridgectl.sh /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh
+sudo install -m 0600 .env.example /data/workspace/sage-wiki-bridge-wxo/.env
 sudo install -m 0644 deploy/systemd/sage-wiki-bridge.service /etc/systemd/system/sage-wiki-bridge.service
-sudo chown -R sagewiki:sagewiki /opt/sage-wiki-bridge
+sudo chown -R sagewiki:sagewiki /data/workspace/sage-wiki-bridge-wxo
 sudo systemctl daemon-reload
 sudo systemctl enable --now sage-wiki-bridge
 ```
 
-Before starting, edit `/etc/sage-wiki-bridge.env`. It contains two groups:
+Before starting, edit `/data/workspace/sage-wiki-bridge-wxo/.env`. It contains two groups:
 
-- `BRIDGE_*`: deployment and runtime knobs consumed by systemd and passed to the process as CLI flags.
+- `BRIDGE_*`: optional deployment/runtime overrides. Unset values use binary defaults.
 - non-`BRIDGE_*`: secrets and environment-bound identifiers loaded by the binary via `--env-file`.
 
-All `BRIDGE_*` variables in the example have defaults. Change at least these before production use:
+For the current production layout, keep or set at least these:
 
 - `BRIDGE_SAGE_WIKI_SOURCE_DIR`
-- `BRIDGE_WHITELIST_JOIN_COMMAND`
+- `BRIDGE_WECHAT_CALLBACK_PATH`
+- `BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED`
+- `BRIDGE_BIND_ADDR` if OpenResty does not proxy to `127.0.0.1:8080`
 - `WECHAT_TOKEN`
 - `WECHAT_APP_ID`
 - `WECHAT_APP_SECRET`
+- `WECHAT_ENCODING_AES_KEY` when encrypted callback mode is enabled
 - `WECHAT_ADMIN_OPENIDS`
 - `ADMIN_VIEW_KEY`
 - provider keys such as `GEMINI_API_KEY`, `TENCENT_LBS_KEY`, and `JINA_API_KEY`
 
-After editing `/etc/sage-wiki-bridge.env`:
+After editing `/data/workspace/sage-wiki-bridge-wxo/.env`:
 
 ```sh
 sudo systemctl restart sage-wiki-bridge
@@ -50,16 +53,16 @@ sudo journalctl -u sage-wiki-bridge -f
 Use the same runner for diagnostics; this avoids manually reconstructing the long `ExecStart` argument list:
 
 ```sh
-sudo ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh -V
-sudo ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh status
+sudo ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh -V
+sudo ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh status
 ```
 
 The binary does not load `.env` implicitly. Config sources must be enabled explicitly:
 
 ```sh
-/opt/sage-wiki-bridge/bin/sage-wiki-bridge --env-file /etc/sage-wiki-bridge.env
+/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env
 ```
 
-Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit delegates to `bridgectl.sh`; that script reads `/etc/sage-wiki-bridge.env`, expands `BRIDGE_*` variables into CLI flags, and passes the same file to the binary with `--env-file` for secrets. Avoid defining app config keys that duplicate CLI flags unless you intentionally want the CLI flag to override the env-file value.
+Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit delegates to `bridgectl.sh`; that script reads `/data/workspace/sage-wiki-bridge-wxo/.env`, expands only explicitly configured `BRIDGE_*` variables into CLI flags, and passes the same file to the binary with `--env-file` for secrets. Avoid defining app config keys that duplicate CLI flags unless you intentionally want the CLI flag to override the env-file value.
 
-The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `SAGE_WIKI_SOURCE_DIR` differs, update `ReadWritePaths` before starting.
+The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `BRIDGE_SAGE_WIKI_SOURCE_DIR` differs, update `ReadWritePaths` before starting.

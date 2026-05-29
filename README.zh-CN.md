@@ -58,13 +58,18 @@ CLI flags > --env-file PATH > --use-process-env > built-in defaults
 
 推荐部署方式:
 
-- 运行参数放在 CLI flags。systemd 场景下，把带默认值的 `BRIDGE_*` 运行参数放在 `/etc/sage-wiki-bridge.env`，unit 会展开成 CLI flags。
-- secrets 放在通过 `--env-file` 显式加载的文件里。
+- secrets 和环境相关覆盖项放在同一个显式 `.env` 文件里。
+- 只有与二进制默认值不同的配置才写 `BRIDGE_*`。
 - 除非进程环境由你明确管理，否则不要使用 `--use-process-env`。
 
-secrets 文件示例:
+生产 `.env` 示例:
 
 ```sh
+BRIDGE_BIND_ADDR=127.0.0.1:8087
+BRIDGE_WECHAT_CALLBACK_PATH=/wechat
+BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED=true
+BRIDGE_SAGE_WIKI_SOURCE_DIR=/data/workspace/sage-wiki/source
+
 WECHAT_TOKEN=...
 WECHAT_APP_ID=...
 WECHAT_APP_SECRET=...
@@ -76,7 +81,7 @@ JINA_API_KEY=...
 ADMIN_VIEW_KEY=...
 ```
 
-本地运行参考 [.env.example](.env.example)，只放 secrets 和环境强相关标识。systemd 部署参考 [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example)，其中 `BRIDGE_*` 是带默认值的运行参数，unit 会把它们展开成 CLI flags；非 `BRIDGE_*` 是传给程序 `--env-file` 的 secrets。完整配置模型见 [技术设计](docs/technical-design.zh-CN.md)。
+参考 [.env.example](.env.example)，systemd 和手工诊断共用这一份 dotenv。完整配置模型见 [技术设计](docs/technical-design.zh-CN.md)。
 
 ## 运行
 
@@ -84,14 +89,7 @@ ADMIN_VIEW_KEY=...
 
 ```sh
 cargo run --bin sage-wiki-bridge -- \
-  --env-file .env \
-  --bind-addr 127.0.0.1:8080 \
-  --database-url sqlite://data/bridge.sqlite3 \
-  --raw-archive-dir data/raw \
-  --processed-artifact-dir data/processed \
-  --sage-wiki-source-dir /path/to/sage-wiki/source \
-  --wechat-callback-path /wechat/callback \
-  --whitelist-join-command /sage-wiki-join
+  --env-file .env
 ```
 
 配置 `--whitelist-join-command` 后，用户给公众号发送完全匹配的文本消息时，服务会把该消息的 `FromUserName` OpenID 加入白名单。该 command 消息会入库留痕，但不会创建 `sage-wiki` 处理 job。
@@ -117,22 +115,20 @@ sage-wiki-bridge status --env-file .env --database-url sqlite://data/bridge.sqli
 打包部署后，使用共用的 env-file runner，让手工诊断和 systemd 使用同一套参数展开逻辑:
 
 ```sh
-ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh -V
-ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh status
+ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh -V
+ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh status
 ```
 
 ## 部署
 
-systemd 模板在 [deploy/systemd](deploy/systemd)。unit 使用 [scripts/bridgectl.sh](scripts/bridgectl.sh) 加载 `/etc/sage-wiki-bridge.env`；`BRIDGE_*` 变量会转成 CLI flags，非 `BRIDGE_*` key 由程序通过 `--env-file` 作为 secrets 读取。
+systemd 模板在 [deploy/systemd](deploy/systemd)。unit 使用 [scripts/bridgectl.sh](scripts/bridgectl.sh) 加载 `/data/workspace/sage-wiki-bridge-wxo/.env`；显式配置的 `BRIDGE_*` 变量会转成 CLI flags，非 `BRIDGE_*` key 由程序通过 `--env-file` 作为 secrets 读取。
 
-部署前需要核对:
+部署前需要核对生产 `.env`:
 
-- `--database-url`
-- `--raw-archive-dir`
-- `--processed-artifact-dir`
-- `--sage-wiki-source-dir`
-- `--wechat-callback-path`
-- `--whitelist-join-command`
+- `BRIDGE_BIND_ADDR`
+- `BRIDGE_WECHAT_CALLBACK_PATH`
+- `BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED`
+- `BRIDGE_SAGE_WIKI_SOURCE_DIR`
 - `ReadWritePaths`
 - `MemoryMax`
 

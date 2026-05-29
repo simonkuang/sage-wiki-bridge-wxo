@@ -7,9 +7,10 @@ Wants=network-online.target
 Type=simple
 User=sagewiki
 Group=sagewiki
-WorkingDirectory=/opt/sage-wiki-bridge
-EnvironmentFile=/etc/sage-wiki-bridge.env
-ExecStart=/opt/sage-wiki-bridge/scripts/bridgectl.sh run
+WorkingDirectory=/data/workspace/sage-wiki-bridge-wxo
+EnvironmentFile=/data/workspace/sage-wiki-bridge-wxo/.env
+Environment=ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env
+ExecStart=/data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh run
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20s
@@ -18,7 +19,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/sage-wiki-bridge/data /opt/sage-wiki/source
+ReadWritePaths=/data/workspace/sage-wiki-bridge-wxo/data /data/workspace/sage-wiki/source
 
 MemoryAccounting=true
 MemoryMax=256M

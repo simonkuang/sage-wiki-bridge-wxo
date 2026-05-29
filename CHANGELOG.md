@@ -6,6 +6,14 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-05-30
+
+### Fixed
+
+- Systemd deployment paths now match the production layout: project under `/data/workspace/sage-wiki-bridge-wxo`, binary at `/usr/local/bin/sage-wiki-bridge`, and sage-wiki source at `/data/workspace/sage-wiki/source`.
+- Deployment now uses a single dotenv file at `/data/workspace/sage-wiki-bridge-wxo/.env`.
+- `bridgectl.sh` now passes only explicitly configured `BRIDGE_*` overrides, letting all other runtime options use binary defaults.
+
 ## [0.2.1] - 2026-05-29
 
 ### Fixed

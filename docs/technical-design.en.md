@@ -127,8 +127,8 @@ CLI flags > --env-file PATH > --use-process-env > built-in defaults
 Deployment should keep:
 
 - operational knobs in CLI flags
-- systemd runtime defaults in `BRIDGE_*` variables loaded from `/etc/sage-wiki-bridge.env`, then expanded by the unit into CLI flags
-- secrets in an explicit env file loaded by `--env-file`
+- optional systemd runtime overrides in `BRIDGE_*` variables loaded from `/data/workspace/sage-wiki-bridge-wxo/.env`, then expanded by `bridgectl.sh` into CLI flags
+- secrets in the same explicit env file loaded by `--env-file`
 - process environment disabled unless intentionally used
 
 Representative knobs include:
@@ -148,7 +148,7 @@ Runtime inspection commands:
 - `version`: command form of `--version`.
 - `-V`: print the package version, build target, resolved config values, and value sources, then exit without starting listeners or workers.
 - `status`: read the configured SQLite database and print resolved config plus aggregate message/job counters. Token usage is reported as `not_tracked` until provider usage accounting is persisted.
-- Packaged systemd deployments use `scripts/bridgectl.sh` so `run`, `-V`, and `status` share the same `/etc/sage-wiki-bridge.env` argument expansion.
+- Packaged systemd deployments use `scripts/bridgectl.sh` so `run`, `-V`, and `status` share the same `/data/workspace/sage-wiki-bridge-wxo/.env` argument expansion.
 
 ## 9. External Services
 

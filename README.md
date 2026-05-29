@@ -58,13 +58,18 @@ CLI flags > --env-file PATH > --use-process-env > built-in defaults
 
 Recommended deployment pattern:
 
-- Put operational settings in CLI flags. For systemd, put `BRIDGE_*` runtime defaults in `/etc/sage-wiki-bridge.env`; the unit expands them into CLI flags.
-- Put secrets in an explicit env file loaded with `--env-file`.
+- Put secrets and environment-specific overrides in one explicit `.env` file.
+- Use `BRIDGE_*` only for values that differ from binary defaults.
 - Avoid `--use-process-env` unless the process environment is intentionally managed.
 
-Example secrets file:
+Example production `.env`:
 
 ```sh
+BRIDGE_BIND_ADDR=127.0.0.1:8087
+BRIDGE_WECHAT_CALLBACK_PATH=/wechat
+BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED=true
+BRIDGE_SAGE_WIKI_SOURCE_DIR=/data/workspace/sage-wiki/source
+
 WECHAT_TOKEN=...
 WECHAT_APP_ID=...
 WECHAT_APP_SECRET=...
@@ -76,7 +81,7 @@ JINA_API_KEY=...
 ADMIN_VIEW_KEY=...
 ```
 
-See [.env.example](.env.example) for the local secrets-only env file. For systemd deployments, [deploy/systemd/sage-wiki-bridge.env.example](deploy/systemd/sage-wiki-bridge.env.example) contains `BRIDGE_*` runtime defaults plus secrets; the unit expands `BRIDGE_*` into CLI flags. The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
+See [.env.example](.env.example) for the single dotenv file used by both systemd and manual diagnostics. The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
 
 ## Run
 
@@ -84,14 +89,7 @@ Minimal local run:
 
 ```sh
 cargo run --bin sage-wiki-bridge -- \
-  --env-file .env \
-  --bind-addr 127.0.0.1:8080 \
-  --database-url sqlite://data/bridge.sqlite3 \
-  --raw-archive-dir data/raw \
-  --processed-artifact-dir data/processed \
-  --sage-wiki-source-dir /path/to/sage-wiki/source \
-  --wechat-callback-path /wechat/callback \
-  --whitelist-join-command /sage-wiki-join
+  --env-file .env
 ```
 
 When `--whitelist-join-command` is set, a WeChat text message that exactly matches the command adds that sender's `FromUserName` OpenID to the whitelist. The command message is recorded but does not create a `sage-wiki` job.
@@ -117,22 +115,20 @@ sage-wiki-bridge status --env-file .env --database-url sqlite://data/bridge.sqli
 For packaged deployments, use the shared env-file runner so manual diagnostics and systemd use the same argument mapping:
 
 ```sh
-ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh -V
-ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh status
+ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh -V
+ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh status
 ```
 
 ## Deployment
 
-Systemd templates are in [deploy/systemd](deploy/systemd). The unit uses [scripts/bridgectl.sh](scripts/bridgectl.sh), which loads `/etc/sage-wiki-bridge.env`; `BRIDGE_*` variables become CLI flags, and non-`BRIDGE_*` keys are loaded by the binary as secrets via `--env-file`.
+Systemd templates are in [deploy/systemd](deploy/systemd). The unit uses [scripts/bridgectl.sh](scripts/bridgectl.sh), which loads `/data/workspace/sage-wiki-bridge-wxo/.env`; explicitly configured `BRIDGE_*` variables become CLI flags, and non-`BRIDGE_*` keys are loaded by the binary as secrets via `--env-file`.
 
-Before installing, review:
+Before installing, review the production `.env` values:
 
-- `--database-url`
-- `--raw-archive-dir`
-- `--processed-artifact-dir`
-- `--sage-wiki-source-dir`
-- `--wechat-callback-path`
-- `--whitelist-join-command`
+- `BRIDGE_BIND_ADDR`
+- `BRIDGE_WECHAT_CALLBACK_PATH`
+- `BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED`
+- `BRIDGE_SAGE_WIKI_SOURCE_DIR`
 - `ReadWritePaths`
 - `MemoryMax`
 
