@@ -114,9 +114,16 @@ sage-wiki-bridge status --env-file .env --database-url sqlite://data/bridge.sqli
 
 `-V` prints the package version, build target, resolved config values, and the source of each value without starting the service. `status` reads the configured SQLite database and prints resolved config plus aggregate message/job counters. Secrets are redacted.
 
+For packaged deployments, use the shared env-file runner so manual diagnostics and systemd use the same argument mapping:
+
+```sh
+ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh -V
+ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh status
+```
+
 ## Deployment
 
-Systemd templates are in [deploy/systemd](deploy/systemd). The unit explicitly loads `/etc/sage-wiki-bridge.env`; `BRIDGE_*` variables become CLI flags, and non-`BRIDGE_*` keys are loaded by the binary as secrets via `--env-file`.
+Systemd templates are in [deploy/systemd](deploy/systemd). The unit uses [scripts/bridgectl.sh](scripts/bridgectl.sh), which loads `/etc/sage-wiki-bridge.env`; `BRIDGE_*` variables become CLI flags, and non-`BRIDGE_*` keys are loaded by the binary as secrets via `--env-file`.
 
 Before installing, review:
 

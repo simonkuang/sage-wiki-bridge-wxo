@@ -6,6 +6,13 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-29
+
+### Fixed
+
+- Receiver now logs WeChat callback verification, signature failures, message storage, and job queueing so production callback handling is visible in systemd logs.
+- Systemd and manual diagnostics now share `scripts/bridgectl.sh`, allowing `run`, `-V`, `status`, and `version` to use the same env-file-driven argument mapping.
+
 ## [0.2.0] - 2026-05-29
 
 ### Changed

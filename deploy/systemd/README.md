@@ -4,6 +4,7 @@ Example layout:
 
 ```sh
 /opt/sage-wiki-bridge/bin/sage-wiki-bridge
+/opt/sage-wiki-bridge/scripts/bridgectl.sh
 /opt/sage-wiki-bridge/data/
 /etc/sage-wiki-bridge.env
 /etc/systemd/system/sage-wiki-bridge.service
@@ -13,8 +14,9 @@ Install outline:
 
 ```sh
 sudo useradd --system --home /opt/sage-wiki-bridge --shell /usr/sbin/nologin sagewiki
-sudo mkdir -p /opt/sage-wiki-bridge/bin /opt/sage-wiki-bridge/data
+sudo mkdir -p /opt/sage-wiki-bridge/bin /opt/sage-wiki-bridge/scripts /opt/sage-wiki-bridge/data
 sudo install -m 0755 target/release/sage-wiki-bridge /opt/sage-wiki-bridge/bin/sage-wiki-bridge
+sudo install -m 0755 scripts/bridgectl.sh /opt/sage-wiki-bridge/scripts/bridgectl.sh
 sudo install -m 0600 deploy/systemd/sage-wiki-bridge.env.example /etc/sage-wiki-bridge.env
 sudo install -m 0644 deploy/systemd/sage-wiki-bridge.service /etc/systemd/system/sage-wiki-bridge.service
 sudo chown -R sagewiki:sagewiki /opt/sage-wiki-bridge
@@ -45,12 +47,19 @@ sudo systemctl restart sage-wiki-bridge
 sudo journalctl -u sage-wiki-bridge -f
 ```
 
+Use the same runner for diagnostics; this avoids manually reconstructing the long `ExecStart` argument list:
+
+```sh
+sudo ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh -V
+sudo ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh status
+```
+
 The binary does not load `.env` implicitly. Config sources must be enabled explicitly:
 
 ```sh
 /opt/sage-wiki-bridge/bin/sage-wiki-bridge --env-file /etc/sage-wiki-bridge.env
 ```
 
-Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit reads `/etc/sage-wiki-bridge.env`, expands `BRIDGE_*` variables into CLI flags, and passes the same file to the binary with `--env-file` for secrets. Avoid defining app config keys that duplicate CLI flags unless you intentionally want the CLI flag to override the env-file value.
+Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit delegates to `bridgectl.sh`; that script reads `/etc/sage-wiki-bridge.env`, expands `BRIDGE_*` variables into CLI flags, and passes the same file to the binary with `--env-file` for secrets. Avoid defining app config keys that duplicate CLI flags unless you intentionally want the CLI flag to override the env-file value.
 
 The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `SAGE_WIKI_SOURCE_DIR` differs, update `ReadWritePaths` before starting.

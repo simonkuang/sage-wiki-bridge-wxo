@@ -148,6 +148,7 @@ Runtime inspection commands:
 - `version`: command form of `--version`.
 - `-V`: print the package version, build target, resolved config values, and value sources, then exit without starting listeners or workers.
 - `status`: read the configured SQLite database and print resolved config plus aggregate message/job counters. Token usage is reported as `not_tracked` until provider usage accounting is persisted.
+- Packaged systemd deployments use `scripts/bridgectl.sh` so `run`, `-V`, and `status` share the same `/etc/sage-wiki-bridge.env` argument expansion.
 
 ## 9. External Services
 

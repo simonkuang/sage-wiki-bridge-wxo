@@ -78,8 +78,20 @@ async fn verify_callback(
         &query.nonce,
         &query.signature,
     ) {
+        tracing::info!(
+            component = "receiver",
+            timestamp = %query.timestamp,
+            nonce = %query.nonce,
+            "wechat callback verification succeeded"
+        );
         query.echostr.into_response()
     } else {
+        tracing::warn!(
+            component = "receiver",
+            timestamp = %query.timestamp,
+            nonce = %query.nonce,
+            "wechat callback verification failed"
+        );
         StatusCode::FORBIDDEN.into_response()
     }
 }
@@ -92,9 +104,27 @@ async fn receive_callback(
     match receive_message(&state, &query, &body).await {
         Ok(Some(reply_xml)) => reply_xml.into_response(),
         Ok(None) => "".into_response(),
-        Err(BridgeError::WechatSignatureInvalid) => StatusCode::FORBIDDEN.into_response(),
+        Err(BridgeError::WechatSignatureInvalid) => {
+            tracing::warn!(
+                component = "receiver",
+                timestamp = %query.timestamp,
+                nonce = %query.nonce,
+                encrypt_type = query.encrypt_type.as_deref().unwrap_or("plain"),
+                body_bytes = body.len(),
+                "wechat callback signature invalid"
+            );
+            StatusCode::FORBIDDEN.into_response()
+        }
         Err(err) => {
-            tracing::warn!(component = "receiver", error = %err, "callback failed");
+            tracing::warn!(
+                component = "receiver",
+                timestamp = %query.timestamp,
+                nonce = %query.nonce,
+                encrypt_type = query.encrypt_type.as_deref().unwrap_or("plain"),
+                body_bytes = body.len(),
+                error = %err,
+                "wechat callback failed"
+            );
             StatusCode::BAD_REQUEST.into_response()
         }
     }
@@ -270,6 +300,20 @@ async fn process_plain_xml(
             raw_dir: raw_dir.to_string(),
         })
         .await?;
+    tracing::info!(
+        component = "receiver",
+        request_id,
+        message_id,
+        wechat_msg_id = common.msg_id.as_ref().map(|msg_id| msg_id.as_str()).unwrap_or(""),
+        openid_hash = %OpenIdHash::sha256_for_display(&common.from_user_name),
+        message_type = %message.msg_type(),
+        status,
+        authorized,
+        supported,
+        encrypt_type = encrypt_type.unwrap_or("plain"),
+        raw_dir,
+        "wechat callback message stored"
+    );
 
     if whitelist_join_requested {
         let openid_hash = OpenIdHash::sha256_for_display(&common.from_user_name).to_string();
@@ -292,10 +336,18 @@ async fn process_plain_xml(
     }
 
     if authorized && supported {
-        state
+        let job_id = state
             .store
             .create_job_once(message_id, "process_message", &received_at)
             .await?;
+        tracing::info!(
+            component = "receiver",
+            request_id,
+            message_id,
+            job_id,
+            message_type = %message.msg_type(),
+            "wechat callback job queued"
+        );
     }
 
     if !authorized && state.config.honeypot_reply_enabled {

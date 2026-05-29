@@ -114,9 +114,16 @@ sage-wiki-bridge status --env-file .env --database-url sqlite://data/bridge.sqli
 
 `-V` 会打印 package version、构建目标、解析后的配置值和每个值的来源，但不会启动服务。`status` 会读取配置指向的 SQLite 数据库，打印解析后的配置以及 message/job 聚合计数。secrets 会被脱敏。
 
+打包部署后，使用共用的 env-file runner，让手工诊断和 systemd 使用同一套参数展开逻辑:
+
+```sh
+ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh -V
+ENV_FILE=/etc/sage-wiki-bridge.env /opt/sage-wiki-bridge/scripts/bridgectl.sh status
+```
+
 ## 部署
 
-systemd 模板在 [deploy/systemd](deploy/systemd)。unit 显式加载 `/etc/sage-wiki-bridge.env`；`BRIDGE_*` 变量会转成 CLI flags，非 `BRIDGE_*` key 由程序通过 `--env-file` 作为 secrets 读取。
+systemd 模板在 [deploy/systemd](deploy/systemd)。unit 使用 [scripts/bridgectl.sh](scripts/bridgectl.sh) 加载 `/etc/sage-wiki-bridge.env`；`BRIDGE_*` 变量会转成 CLI flags，非 `BRIDGE_*` key 由程序通过 `--env-file` 作为 secrets 读取。
 
 部署前需要核对:
 
