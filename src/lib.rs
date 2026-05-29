@@ -21,7 +21,10 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use crate::{
     admin::AdminState,
     archive::{ProcessedArtifactStore, RawArchive},
-    config::{AppConfig, EnvSecrets, RuntimeConfig, runtime_config_from_args},
+    config::{
+        AppConfig, CliCommand, CliConfig, ConfigReportEntry, EnvSecrets, RuntimeConfig,
+        RuntimeConfigReport, runtime_config_report_from_args,
+    },
     enrich::{
         http_client::HttpExternalClients, jina_reader::JinaReaderOptions,
         tencent_lbs::TencentLbsOptions,
@@ -32,7 +35,7 @@ use crate::{
     media::{WechatApiConfig, WechatMediaClient},
     receiver::{ReceiverConfig, ReceiverState},
     source::SourceWriter,
-    store::Store,
+    store::{StatusSnapshot, Store},
     worker::{
         ExternalClients, MediaJobProcessor, NoopExternalClients, NoopMediaJobProcessor,
         RetryPolicy, WorkOutcome, Worker, media_processor::GeminiMediaJobProcessor,
@@ -48,10 +51,100 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    let Some(runtime_config) = runtime_config_from_args(args)? else {
+    let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let cli = CliConfig::parse(args.clone())?;
+    let Some(report) = runtime_config_report_from_args(args)? else {
         return Ok(());
     };
-    run_with_config(runtime_config).await
+
+    if cli.verbose_version {
+        print_verbose_config_report(&report);
+        return Ok(());
+    }
+    if cli.command == Some(CliCommand::Status) {
+        print_status_report(&report).await?;
+        return Ok(());
+    }
+
+    run_with_config(report.runtime).await
+}
+
+fn print_verbose_config_report(report: &RuntimeConfigReport) {
+    println!("sage-wiki-bridge {}", env!("CARGO_PKG_VERSION"));
+    println!("build:");
+    println!("  package_version: {}", env!("CARGO_PKG_VERSION"));
+    println!("  target: {}", std::env::consts::ARCH);
+    println!("  os: {}", std::env::consts::OS);
+    println!("config:");
+    print_config_entries(&report.entries);
+}
+
+async fn print_status_report(report: &RuntimeConfigReport) -> Result<(), BridgeError> {
+    let config = &report.runtime.app;
+    let store = Store::connect_with_pool_options(
+        &config.database_url,
+        config.database_max_connections,
+        config.database_min_connections,
+    )
+    .await?;
+    let snapshot = store.status_snapshot().await?;
+
+    println!("sage-wiki-bridge status");
+    println!("instance:");
+    println!("  scope: configured_sqlite_snapshot");
+    println!("  package_version: {}", env!("CARGO_PKG_VERSION"));
+    println!("  status_command_pid: {}", std::process::id());
+    println!("  database_url: {}", config.database_url);
+    println!("  bind_addr: {}", config.bind_addr);
+    println!("  worker_enabled: {}", config.worker_enabled);
+    println!("config:");
+    print_config_entries(&report.entries);
+    println!("metrics:");
+    print_status_snapshot(&snapshot);
+
+    Ok(())
+}
+
+fn print_config_entries(entries: &[ConfigReportEntry]) {
+    for entry in entries {
+        let redacted = if entry.secret { ", redacted" } else { "" };
+        println!(
+            "  {} = {}  # flag: {}, source: {}{}",
+            entry.key, entry.value, entry.flag, entry.source, redacted
+        );
+    }
+}
+
+fn print_status_snapshot(snapshot: &StatusSnapshot) {
+    println!("  total_messages: {}", snapshot.total_messages);
+    println!("  authorized_messages: {}", snapshot.authorized_messages);
+    println!("  failed_messages: {}", snapshot.failed_messages);
+    println!(
+        "  source_written_messages: {}",
+        snapshot.source_written_messages
+    );
+    println!("  total_jobs: {}", snapshot.total_jobs);
+    println!("  total_job_attempts: {}", snapshot.total_job_attempts);
+    println!("  retry_attempts: {}", snapshot.retry_attempts);
+    println!("  processed_text_bytes: {}", snapshot.processed_text_bytes);
+    println!("  source_bytes_written: {}", snapshot.source_bytes_written);
+    println!("  token_usage: not_tracked");
+    println!("  messages_by_status:");
+    print_grouped_counts(&snapshot.messages_by_status);
+    println!("  messages_by_type:");
+    print_grouped_counts(&snapshot.messages_by_type);
+    println!("  jobs_by_status:");
+    print_grouped_counts(&snapshot.jobs_by_status);
+}
+
+fn print_grouped_counts(counts: &[(String, i64)]) {
+    if counts.is_empty() {
+        println!("    <empty>: 0");
+        return;
+    }
+    for (key, count) in counts {
+        println!("    {key}: {count}");
+    }
 }
 
 pub async fn run_with_config(runtime_config: RuntimeConfig) -> Result<(), error::BridgeError> {

@@ -77,6 +77,8 @@ const HELP: &str = r#"sage-wiki-bridge
 
 Usage:
   sage-wiki-bridge [OPTIONS]
+  sage-wiki-bridge version [OPTIONS]
+  sage-wiki-bridge status [OPTIONS]
 
 Configuration sources are explicit and ordered:
   CLI flags > --env-file PATH > --use-process-env > built-in defaults.
@@ -88,6 +90,10 @@ Source controls:
       Read process environment variables. Default: false.
   --help
       Print this help.
+  --version
+      Print the package version and exit.
+  -V
+      Print detailed version, resolved config, and config sources, then exit.
 
 Core:
   --rust-log VALUE
@@ -209,11 +215,35 @@ pub struct RuntimeConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeConfigReport {
+    pub runtime: RuntimeConfig,
+    pub entries: Vec<ConfigReportEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigReportEntry {
+    pub key: &'static str,
+    pub flag: &'static str,
+    pub value: String,
+    pub source: String,
+    pub secret: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliConfig {
     pub env_file: Option<PathBuf>,
     pub use_process_env: bool,
     pub help: bool,
+    pub version: bool,
+    pub verbose_version: bool,
+    pub command: Option<CliCommand>,
     values: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CliCommand {
+    Version,
+    Status,
 }
 
 impl CliConfig {
@@ -227,12 +257,19 @@ impl CliConfig {
             env_file: None,
             use_process_env: false,
             help: false,
+            version: false,
+            verbose_version: false,
+            command: None,
             values: HashMap::new(),
         };
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
+                "version" if config.command.is_none() => config.command = Some(CliCommand::Version),
+                "status" if config.command.is_none() => config.command = Some(CliCommand::Status),
                 "--help" | "-h" => config.help = true,
+                "--version" => config.version = true,
+                "-V" => config.verbose_version = true,
                 "--use-process-env" => config.use_process_env = true,
                 "--env-file" => {
                     let value = next_arg_value(&mut args, "--env-file")?;
@@ -268,25 +305,69 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
+    let report = runtime_config_report_from_args(args)?;
+    Ok(report.map(|report| report.runtime))
+}
+
+pub fn runtime_config_report_from_args<I, S>(
+    args: I,
+) -> Result<Option<RuntimeConfigReport>, BridgeError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
     let cli = CliConfig::parse(args)?;
     if cli.help {
         println!("{}", CliConfig::help_text());
         return Ok(None);
     }
+    if cli.version || cli.command == Some(CliCommand::Version) {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(None);
+    }
 
-    let mut values = HashMap::new();
+    let mut resolved = ResolvedValues::default();
     if cli.use_process_env {
-        values.extend(env::vars().filter(|(_, value)| !value.trim().is_empty()));
+        for (key, value) in env::vars().filter(|(_, value)| !value.trim().is_empty()) {
+            resolved.insert(key, value, "process-env".to_string());
+        }
     }
     if let Some(env_file) = cli.env_file.as_deref() {
-        values.extend(load_env_file(env_file)?);
+        for (key, value) in load_env_file(env_file)? {
+            resolved.insert(key, value, format!("env-file:{}", env_file.display()));
+        }
     }
-    values.extend(cli.values);
+    for (key, value) in cli.values {
+        resolved.insert(key, value, "cli".to_string());
+    }
 
-    Ok(Some(RuntimeConfig {
-        app: AppConfig::from_lookup(|key| values.get(key).cloned())?,
-        secrets: EnvSecrets::from_lookup(|key| values.get(key).cloned()),
-    }))
+    let runtime = RuntimeConfig {
+        app: AppConfig::from_lookup(|key| resolved.values.get(key).cloned())?,
+        secrets: EnvSecrets::from_lookup(|key| resolved.values.get(key).cloned()),
+    };
+    let entries = config_report_entries(&runtime, &resolved);
+
+    Ok(Some(RuntimeConfigReport { runtime, entries }))
+}
+
+#[derive(Default)]
+struct ResolvedValues {
+    values: HashMap<String, String>,
+    sources: HashMap<String, String>,
+}
+
+impl ResolvedValues {
+    fn insert(&mut self, key: String, value: String, source: String) {
+        self.values.insert(key.clone(), value);
+        self.sources.insert(key, source);
+    }
+
+    fn source(&self, key: &str) -> String {
+        self.sources
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| "default".to_string())
+    }
 }
 
 fn next_arg_value<I>(args: &mut std::iter::Peekable<I>, flag: &str) -> Result<String, BridgeError>
@@ -657,6 +738,432 @@ where
         .filter(|value| !value.is_empty())
 }
 
+fn config_report_entries(
+    runtime: &RuntimeConfig,
+    resolved: &ResolvedValues,
+) -> Vec<ConfigReportEntry> {
+    let app = &runtime.app;
+    let secrets = &runtime.secrets;
+    let mut entries = vec![
+        entry(
+            "APP_BIND_ADDR",
+            "--bind-addr",
+            &app.bind_addr,
+            resolved,
+            false,
+        ),
+        entry(
+            "DATABASE_URL",
+            "--database-url",
+            &app.database_url,
+            resolved,
+            false,
+        ),
+        entry_u32(
+            "DATABASE_MAX_CONNECTIONS",
+            "--database-max-connections",
+            app.database_max_connections,
+            resolved,
+        ),
+        entry_u32(
+            "DATABASE_MIN_CONNECTIONS",
+            "--database-min-connections",
+            app.database_min_connections,
+            resolved,
+        ),
+        entry_path(
+            "RAW_ARCHIVE_DIR",
+            "--raw-archive-dir",
+            &app.raw_archive_dir,
+            resolved,
+        ),
+        entry_bool(
+            "RAW_ARCHIVE_FULL",
+            "--raw-archive-full",
+            app.raw_archive_full,
+            resolved,
+        ),
+        entry_path(
+            "PROCESSED_ARTIFACT_DIR",
+            "--processed-artifact-dir",
+            &app.processed_artifact_dir,
+            resolved,
+        ),
+        entry_path(
+            "SAGE_WIKI_SOURCE_DIR",
+            "--sage-wiki-source-dir",
+            &app.source_dir,
+            resolved,
+        ),
+        entry(
+            "WECHAT_CALLBACK_PATH",
+            "--wechat-callback-path",
+            &app.callback_path,
+            resolved,
+            false,
+        ),
+        entry_bool(
+            "WECHAT_ENCRYPTED_CALLBACK_ENABLED",
+            "--wechat-encrypted-callback-enabled",
+            app.encrypted_callback_enabled,
+            resolved,
+        ),
+        entry_bool(
+            "HONEYPOT_REPLY_ENABLED",
+            "--honeypot-reply-enabled",
+            app.honeypot_reply_enabled,
+            resolved,
+        ),
+        entry(
+            "HONEYPOT_REPLY_TEXT",
+            "--honeypot-reply-text",
+            &app.honeypot_reply_text,
+            resolved,
+            false,
+        ),
+        entry_bool(
+            "WORKER_ENABLED",
+            "--worker-enabled",
+            app.worker_enabled,
+            resolved,
+        ),
+        entry("WORKER_ID", "--worker-id", &app.worker_id, resolved, false),
+        entry(
+            "BRIDGE_VERSION",
+            "--bridge-version",
+            &app.bridge_version,
+            resolved,
+            false,
+        ),
+        entry_u64(
+            "WORKER_INTERVAL_MS",
+            "--worker-interval-ms",
+            app.worker_interval.as_millis() as u64,
+            resolved,
+        ),
+        entry_u64(
+            "WORKER_PROCESSING_TIMEOUT_SECONDS",
+            "--worker-processing-timeout-seconds",
+            app.worker_processing_timeout.as_secs(),
+            resolved,
+        ),
+        entry_u64(
+            "WORKER_RETRY_BASE_SECONDS",
+            "--worker-retry-base-seconds",
+            app.worker_retry_base.as_secs(),
+            resolved,
+        ),
+        entry_u64(
+            "WORKER_RETRY_MAX_SECONDS",
+            "--worker-retry-max-seconds",
+            app.worker_retry_max.as_secs(),
+            resolved,
+        ),
+        entry_u64(
+            "HTTP_TIMEOUT_SECONDS",
+            "--http-timeout-seconds",
+            app.http_timeout.as_secs(),
+            resolved,
+        ),
+        entry(
+            "REQUEST_BODY_LIMIT_BYTES",
+            "--request-body-limit-bytes",
+            &app.request_body_limit_bytes.to_string(),
+            resolved,
+            false,
+        ),
+        entry(
+            "HEALTHZ_PATH",
+            "--healthz-path",
+            &app.healthz_path,
+            resolved,
+            false,
+        ),
+        entry(
+            "READYZ_PATH",
+            "--readyz-path",
+            &app.readyz_path,
+            resolved,
+            false,
+        ),
+        entry(
+            "WECHAT_API_BASE",
+            "--wechat-api-base",
+            &app.wechat_api_base,
+            resolved,
+            false,
+        ),
+        entry_u64(
+            "MAX_MEDIA_BYTES",
+            "--max-media-bytes",
+            app.max_media_bytes,
+            resolved,
+        ),
+        entry_u64(
+            "WECHAT_TOKEN_REFRESH_SKEW_SECONDS",
+            "--wechat-token-refresh-skew-seconds",
+            app.wechat_token_refresh_skew.as_secs(),
+            resolved,
+        ),
+        entry_opt(
+            "WHITELIST_JOIN_COMMAND",
+            "--whitelist-join-command",
+            app.whitelist_join_command.as_deref(),
+            resolved,
+            false,
+        ),
+        entry(
+            "GEMINI_ENDPOINT_BASE",
+            "--gemini-endpoint-base",
+            &app.gemini_endpoint_base,
+            resolved,
+            false,
+        ),
+        entry(
+            "GEMINI_MODEL",
+            "--gemini-model",
+            &app.gemini_model,
+            resolved,
+            false,
+        ),
+        entry_u64(
+            "GEMINI_MAX_INLINE_BYTES",
+            "--gemini-max-inline-bytes",
+            app.gemini_max_inline_bytes,
+            resolved,
+        ),
+        entry(
+            "LLM_IMAGE_SYSTEM_PROMPT",
+            "--llm-image-system-prompt",
+            &app.llm_image_system_prompt,
+            resolved,
+            false,
+        ),
+        entry(
+            "LLM_VOICE_SYSTEM_PROMPT",
+            "--llm-voice-system-prompt",
+            &app.llm_voice_system_prompt,
+            resolved,
+            false,
+        ),
+        entry(
+            "LLM_VIDEO_SYSTEM_PROMPT",
+            "--llm-video-system-prompt",
+            &app.llm_video_system_prompt,
+            resolved,
+            false,
+        ),
+        entry(
+            "TENCENT_LBS_ENDPOINT",
+            "--tencent-lbs-endpoint",
+            &app.tencent_lbs_endpoint,
+            resolved,
+            false,
+        ),
+        entry_bool(
+            "TENCENT_LBS_GET_POI",
+            "--tencent-lbs-get-poi",
+            app.tencent_lbs_get_poi,
+            resolved,
+        ),
+        ConfigReportEntry {
+            key: "TENCENT_LBS_RADIUS_METERS",
+            flag: "--tencent-lbs-radius-meters",
+            value: app
+                .tencent_lbs_radius_meters
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            source: resolved.source("TENCENT_LBS_RADIUS_METERS"),
+            secret: false,
+        },
+        entry(
+            "JINA_READER_ENDPOINT",
+            "--jina-reader-endpoint",
+            &app.jina_reader_endpoint,
+            resolved,
+            false,
+        ),
+        entry("RUST_LOG", "--rust-log", &app.log_filter, resolved, false),
+        entry(
+            "ADMIN_BASE_PATH",
+            "--admin-base-path",
+            &app.admin_base_path,
+            resolved,
+            false,
+        ),
+        entry_u32(
+            "ADMIN_DEFAULT_PER_PAGE",
+            "--admin-default-per-page",
+            app.admin_default_per_page,
+            resolved,
+        ),
+        entry_u32(
+            "ADMIN_MAX_PER_PAGE",
+            "--admin-max-per-page",
+            app.admin_max_per_page,
+            resolved,
+        ),
+    ];
+
+    entries.extend([
+        secret_entry(
+            "WECHAT_TOKEN",
+            "--wechat-token",
+            secrets.wechat_token.as_deref(),
+            resolved,
+        ),
+        secret_entry(
+            "WECHAT_APP_ID",
+            "--wechat-app-id",
+            secrets.wechat_app_id.as_deref(),
+            resolved,
+        ),
+        secret_entry(
+            "WECHAT_APP_SECRET",
+            "--wechat-app-secret",
+            secrets.wechat_app_secret.as_deref(),
+            resolved,
+        ),
+        secret_entry(
+            "WECHAT_ENCODING_AES_KEY",
+            "--wechat-encoding-aes-key",
+            secrets.wechat_encoding_aes_key.as_deref(),
+            resolved,
+        ),
+        secret_entry(
+            "ADMIN_VIEW_KEY",
+            "--admin-view-key",
+            secrets.admin_view_key.as_deref(),
+            resolved,
+        ),
+        secret_entry(
+            "GEMINI_API_KEY",
+            "--gemini-api-key",
+            secrets.gemini_api_key.as_deref(),
+            resolved,
+        ),
+        secret_entry(
+            "OPENAI_API_KEY",
+            "--openai-api-key",
+            secrets.openai_api_key.as_deref(),
+            resolved,
+        ),
+        secret_entry(
+            "ANTHROPIC_API_KEY",
+            "--anthropic-api-key",
+            secrets.anthropic_api_key.as_deref(),
+            resolved,
+        ),
+        secret_entry(
+            "TENCENT_LBS_KEY",
+            "--tencent-lbs-key",
+            secrets.tencent_lbs_key.as_deref(),
+            resolved,
+        ),
+        secret_entry(
+            "JINA_API_KEY",
+            "--jina-api-key",
+            secrets.jina_api_key.as_deref(),
+            resolved,
+        ),
+        ConfigReportEntry {
+            key: "WECHAT_ADMIN_OPENIDS",
+            flag: "--wechat-admin-openids",
+            value: format!("<redacted:{}>", secrets.admin_openids.len()),
+            source: resolved.source("WECHAT_ADMIN_OPENIDS"),
+            secret: true,
+        },
+    ]);
+
+    entries
+}
+
+fn entry(
+    key: &'static str,
+    flag: &'static str,
+    value: &str,
+    resolved: &ResolvedValues,
+    secret: bool,
+) -> ConfigReportEntry {
+    ConfigReportEntry {
+        key,
+        flag,
+        value: value.to_string(),
+        source: resolved.source(key),
+        secret,
+    }
+}
+
+fn entry_opt(
+    key: &'static str,
+    flag: &'static str,
+    value: Option<&str>,
+    resolved: &ResolvedValues,
+    secret: bool,
+) -> ConfigReportEntry {
+    entry(key, flag, value.unwrap_or(""), resolved, secret)
+}
+
+fn entry_path(
+    key: &'static str,
+    flag: &'static str,
+    value: &Path,
+    resolved: &ResolvedValues,
+) -> ConfigReportEntry {
+    entry(key, flag, &value.display().to_string(), resolved, false)
+}
+
+fn entry_bool(
+    key: &'static str,
+    flag: &'static str,
+    value: bool,
+    resolved: &ResolvedValues,
+) -> ConfigReportEntry {
+    entry(
+        key,
+        flag,
+        if value { "true" } else { "false" },
+        resolved,
+        false,
+    )
+}
+
+fn entry_u32(
+    key: &'static str,
+    flag: &'static str,
+    value: u32,
+    resolved: &ResolvedValues,
+) -> ConfigReportEntry {
+    entry(key, flag, &value.to_string(), resolved, false)
+}
+
+fn entry_u64(
+    key: &'static str,
+    flag: &'static str,
+    value: u64,
+    resolved: &ResolvedValues,
+) -> ConfigReportEntry {
+    entry(key, flag, &value.to_string(), resolved, false)
+}
+
+fn secret_entry(
+    key: &'static str,
+    flag: &'static str,
+    value: Option<&str>,
+    resolved: &ResolvedValues,
+) -> ConfigReportEntry {
+    ConfigReportEntry {
+        key,
+        flag,
+        value: match value {
+            Some(value) if !value.is_empty() => format!("<redacted:{}>", value.len()),
+            _ => String::new(),
+        },
+        source: resolved.source(key),
+        secret: true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -726,6 +1233,44 @@ mod tests {
         let runtime = runtime_config_from_args(["sage-wiki-bridge", "--help"]).unwrap();
 
         assert!(runtime.is_none());
+    }
+
+    #[test]
+    fn version_returns_no_runtime_config() {
+        let runtime = runtime_config_from_args(["sage-wiki-bridge", "--version"]).unwrap();
+
+        assert!(runtime.is_none());
+    }
+
+    #[test]
+    fn parses_status_command() {
+        let cli = CliConfig::parse(["sage-wiki-bridge", "status"]).unwrap();
+
+        assert_eq!(cli.command, Some(CliCommand::Status));
+    }
+
+    #[test]
+    fn config_report_tracks_sources() {
+        let report =
+            runtime_config_report_from_args(["sage-wiki-bridge", "--bind-addr", "0.0.0.0:18080"])
+                .unwrap()
+                .unwrap();
+
+        let bind_addr = report
+            .entries
+            .iter()
+            .find(|entry| entry.key == "APP_BIND_ADDR")
+            .unwrap();
+        let database_url = report
+            .entries
+            .iter()
+            .find(|entry| entry.key == "DATABASE_URL")
+            .unwrap();
+
+        assert_eq!(bind_addr.value, "0.0.0.0:18080");
+        assert_eq!(bind_addr.source, "cli");
+        assert_eq!(database_url.value, "sqlite://data/bridge.sqlite3");
+        assert_eq!(database_url.source, "default");
     }
 
     #[test]

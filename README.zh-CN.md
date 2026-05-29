@@ -103,6 +103,17 @@ curl http://127.0.0.1:8080/healthz
 curl http://127.0.0.1:8080/readyz
 ```
 
+运行时检查:
+
+```sh
+sage-wiki-bridge --version
+sage-wiki-bridge version
+sage-wiki-bridge -V --env-file .env --database-url sqlite://data/bridge.sqlite3
+sage-wiki-bridge status --env-file .env --database-url sqlite://data/bridge.sqlite3
+```
+
+`-V` 会打印 package version、构建目标、解析后的配置值和每个值的来源，但不会启动服务。`status` 会读取配置指向的 SQLite 数据库，打印解析后的配置以及 message/job 聚合计数。secrets 会被脱敏。
+
 ## 部署
 
 systemd 模板在 [deploy/systemd](deploy/systemd)。unit 显式加载 `/etc/sage-wiki-bridge.env`；`BRIDGE_*` 变量会转成 CLI flags，非 `BRIDGE_*` key 由程序通过 `--env-file` 作为 secrets 读取。

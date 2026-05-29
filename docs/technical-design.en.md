@@ -142,6 +142,13 @@ Representative knobs include:
 - Gemini/Tencent LBS/Jina endpoints and limits
 - admin pagination and keys
 
+Runtime inspection commands:
+
+- `--version`: print the package version and exit.
+- `version`: command form of `--version`.
+- `-V`: print the package version, build target, resolved config values, and value sources, then exit without starting listeners or workers.
+- `status`: read the configured SQLite database and print resolved config plus aggregate message/job counters. Token usage is reported as `not_tracked` until provider usage accounting is persisted.
+
 ## 9. External Services
 
 | Service | Use |

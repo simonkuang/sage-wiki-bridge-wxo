@@ -2,7 +2,7 @@ use sqlx::{
     Row, SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
-use std::str::FromStr;
+use std::{fs, str::FromStr};
 
 use crate::error::BridgeError;
 
@@ -129,6 +129,22 @@ pub struct MessageDetail {
     pub source_path: Option<String>,
     pub processed_text: Option<String>,
     pub processed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusSnapshot {
+    pub total_messages: i64,
+    pub authorized_messages: i64,
+    pub failed_messages: i64,
+    pub source_written_messages: i64,
+    pub messages_by_status: Vec<(String, i64)>,
+    pub messages_by_type: Vec<(String, i64)>,
+    pub total_jobs: i64,
+    pub jobs_by_status: Vec<(String, i64)>,
+    pub total_job_attempts: i64,
+    pub retry_attempts: i64,
+    pub processed_text_bytes: i64,
+    pub source_bytes_written: u64,
 }
 
 impl Store {
@@ -620,6 +636,98 @@ impl Store {
             processed_at: row.get("processed_at"),
         })
     }
+
+    pub async fn status_snapshot(&self) -> Result<StatusSnapshot, BridgeError> {
+        let total_messages = count_scalar(&self.pool, "SELECT COUNT(*) FROM messages").await?;
+        let authorized_messages = count_scalar(
+            &self.pool,
+            "SELECT COUNT(*) FROM messages WHERE authorized = 1",
+        )
+        .await?;
+        let failed_messages = count_scalar(
+            &self.pool,
+            "SELECT COUNT(*) FROM messages WHERE status = 'failed'",
+        )
+        .await?;
+        let source_written_messages = count_scalar(
+            &self.pool,
+            "SELECT COUNT(*) FROM messages WHERE status = 'source_written'",
+        )
+        .await?;
+        let total_jobs = count_scalar(&self.pool, "SELECT COUNT(*) FROM jobs").await?;
+        let total_job_attempts: i64 =
+            sqlx::query_scalar("SELECT COALESCE(SUM(attempts), 0) FROM jobs")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|err| BridgeError::Database(err.to_string()))?;
+        let retry_attempts: i64 =
+            sqlx::query_scalar("SELECT COALESCE(SUM(MAX(attempts - 1, 0)), 0) FROM jobs")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|err| BridgeError::Database(err.to_string()))?;
+        let processed_text_bytes: i64 =
+            sqlx::query_scalar("SELECT COALESCE(SUM(LENGTH(processed_text)), 0) FROM messages")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|err| BridgeError::Database(err.to_string()))?;
+        let source_paths: Vec<String> = sqlx::query_scalar(
+            "SELECT source_path FROM messages WHERE source_path IS NOT NULL AND source_path != ''",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+        let source_bytes_written = source_paths
+            .iter()
+            .filter_map(|path| fs::metadata(path).ok())
+            .map(|metadata| metadata.len())
+            .sum();
+
+        Ok(StatusSnapshot {
+            total_messages,
+            authorized_messages,
+            failed_messages,
+            source_written_messages,
+            messages_by_status: grouped_counts(
+                &self.pool,
+                "SELECT status, COUNT(*) AS count FROM messages GROUP BY status ORDER BY status",
+            )
+            .await?,
+            messages_by_type: grouped_counts(
+                &self.pool,
+                "SELECT message_type, COUNT(*) AS count FROM messages GROUP BY message_type ORDER BY message_type",
+            )
+            .await?,
+            total_jobs,
+            jobs_by_status: grouped_counts(
+                &self.pool,
+                "SELECT status, COUNT(*) AS count FROM jobs GROUP BY status ORDER BY status",
+            )
+            .await?,
+            total_job_attempts,
+            retry_attempts,
+            processed_text_bytes,
+            source_bytes_written,
+        })
+    }
+}
+
+async fn count_scalar(pool: &SqlitePool, sql: &str) -> Result<i64, BridgeError> {
+    sqlx::query_scalar(sql)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))
+}
+
+async fn grouped_counts(pool: &SqlitePool, sql: &str) -> Result<Vec<(String, i64)>, BridgeError> {
+    let rows = sqlx::query(sql)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.get::<String, _>(0), row.get::<i64, _>(1)))
+        .collect())
 }
 
 fn message_filter_count_sql() -> &'static str {
@@ -1003,5 +1111,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(fresh_status, "processing");
+    }
+
+    #[tokio::test]
+    async fn status_snapshot_summarizes_messages_and_jobs() {
+        let store = test_store().await;
+        let message_id = store
+            .insert_message_idempotent(&message("msg_status"))
+            .await
+            .unwrap();
+        store
+            .create_job_once(message_id, "process_message", "2026-05-27T21:30:15+08:00")
+            .await
+            .unwrap();
+        store
+            .claim_next_job("worker-test", "2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap();
+        store
+            .mark_message_source_written(message_id, "missing-source-file.md", "processed")
+            .await
+            .unwrap();
+
+        let snapshot = store.status_snapshot().await.unwrap();
+
+        assert_eq!(snapshot.total_messages, 1);
+        assert_eq!(snapshot.authorized_messages, 1);
+        assert_eq!(snapshot.source_written_messages, 1);
+        assert_eq!(snapshot.total_jobs, 1);
+        assert_eq!(snapshot.total_job_attempts, 1);
+        assert_eq!(snapshot.retry_attempts, 0);
+        assert_eq!(snapshot.processed_text_bytes, 9);
+        assert!(
+            snapshot
+                .messages_by_status
+                .contains(&("source_written".to_string(), 1))
+        );
+        assert!(snapshot.messages_by_type.contains(&("text".to_string(), 1)));
     }
 }

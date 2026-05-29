@@ -103,6 +103,17 @@ curl http://127.0.0.1:8080/healthz
 curl http://127.0.0.1:8080/readyz
 ```
 
+Runtime inspection:
+
+```sh
+sage-wiki-bridge --version
+sage-wiki-bridge version
+sage-wiki-bridge -V --env-file .env --database-url sqlite://data/bridge.sqlite3
+sage-wiki-bridge status --env-file .env --database-url sqlite://data/bridge.sqlite3
+```
+
+`-V` prints the package version, build target, resolved config values, and the source of each value without starting the service. `status` reads the configured SQLite database and prints resolved config plus aggregate message/job counters. Secrets are redacted.
+
 ## Deployment
 
 Systemd templates are in [deploy/systemd](deploy/systemd). The unit explicitly loads `/etc/sage-wiki-bridge.env`; `BRIDGE_*` variables become CLI flags, and non-`BRIDGE_*` keys are loaded by the binary as secrets via `--env-file`.
