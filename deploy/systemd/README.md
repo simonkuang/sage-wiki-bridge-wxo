@@ -32,6 +32,7 @@ Before starting, edit `/data/workspace/sage-wiki-bridge-wxo/.env`. It contains t
 For the current production layout, keep or set at least these:
 
 - `BRIDGE_SAGE_WIKI_SOURCE_DIR`
+- `BRIDGE_SAGE_WIKI_SOURCE_LOG_DIR` if the default `data/source-log` is not suitable
 - `BRIDGE_WECHAT_CALLBACK_PATH`
 - `BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED`
 - `BRIDGE_BIND_ADDR` if OpenResty does not proxy to `127.0.0.1:8080`
@@ -83,4 +84,4 @@ The binary does not load `.env` implicitly. Config sources must be enabled expli
 
 Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit starts the binary directly, and the binary natively reads secrets plus `BRIDGE_*` runtime overrides from `/data/workspace/sage-wiki-bridge-wxo/.env`.
 
-The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `BRIDGE_SAGE_WIKI_SOURCE_DIR` differs, update `ReadWritePaths` before starting.
+The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `BRIDGE_SAGE_WIKI_SOURCE_DIR` or `BRIDGE_SAGE_WIKI_SOURCE_LOG_DIR` differs from the default writable roots, update `ReadWritePaths` before starting.

@@ -18,6 +18,7 @@ const FLAG_SPECS: &[(&str, &str)] = &[
     ("--raw-archive-full", "RAW_ARCHIVE_FULL"),
     ("--processed-artifact-dir", "PROCESSED_ARTIFACT_DIR"),
     ("--sage-wiki-source-dir", "SAGE_WIKI_SOURCE_DIR"),
+    ("--sage-wiki-source-log-dir", "SAGE_WIKI_SOURCE_LOG_DIR"),
     ("--wechat-callback-path", "WECHAT_CALLBACK_PATH"),
     (
         "--wechat-encrypted-callback-enabled",
@@ -90,6 +91,10 @@ const ENV_ALIAS_SPECS: &[(&str, &str)] = &[
     ("BRIDGE_RAW_ARCHIVE_FULL", "RAW_ARCHIVE_FULL"),
     ("BRIDGE_PROCESSED_ARTIFACT_DIR", "PROCESSED_ARTIFACT_DIR"),
     ("BRIDGE_SAGE_WIKI_SOURCE_DIR", "SAGE_WIKI_SOURCE_DIR"),
+    (
+        "BRIDGE_SAGE_WIKI_SOURCE_LOG_DIR",
+        "SAGE_WIKI_SOURCE_LOG_DIR",
+    ),
     ("BRIDGE_WECHAT_CALLBACK_PATH", "WECHAT_CALLBACK_PATH"),
     (
         "BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED",
@@ -204,6 +209,8 @@ Core:
       Default: data/processed
   --sage-wiki-source-dir VALUE
       Default: source
+  --sage-wiki-source-log-dir VALUE
+      Default: data/source-log
   --http-timeout-seconds VALUE
       Default: 30
   --request-body-limit-bytes VALUE
@@ -650,6 +657,7 @@ pub struct AppConfig {
     pub raw_archive_full: bool,
     pub processed_artifact_dir: PathBuf,
     pub source_dir: PathBuf,
+    pub source_log_dir: PathBuf,
     pub callback_path: String,
     pub encrypted_callback_enabled: bool,
     pub honeypot_reply_enabled: bool,
@@ -707,6 +715,11 @@ impl AppConfig {
                 "data/processed",
             )),
             source_dir: PathBuf::from(get_string(&lookup, "SAGE_WIKI_SOURCE_DIR", "source")),
+            source_log_dir: PathBuf::from(get_string(
+                &lookup,
+                "SAGE_WIKI_SOURCE_LOG_DIR",
+                "data/source-log",
+            )),
             callback_path: get_string(&lookup, "WECHAT_CALLBACK_PATH", "/wechat/callback"),
             encrypted_callback_enabled: get_bool(
                 &lookup,
@@ -924,6 +937,12 @@ fn config_report_entries(
             "SAGE_WIKI_SOURCE_DIR",
             "--sage-wiki-source-dir",
             &app.source_dir,
+            resolved,
+        ),
+        entry_path(
+            "SAGE_WIKI_SOURCE_LOG_DIR",
+            "--sage-wiki-source-log-dir",
+            &app.source_log_dir,
             resolved,
         ),
         entry(
@@ -1460,6 +1479,7 @@ mod tests {
 
         assert!(help.contains("--bind-addr VALUE\n      Default: 127.0.0.1:8080"));
         assert!(help.contains("--database-url VALUE\n      Default: sqlite://data/bridge.sqlite3"));
+        assert!(help.contains("--sage-wiki-source-log-dir VALUE\n      Default: data/source-log"));
         assert!(help.contains("--worker-enabled true|false\n      Default: true"));
         assert!(help.contains("--wechat-token VALUE\n      Default: none."));
         assert!(help.contains("--whitelist-join-command VALUE\n      Default: empty."));
@@ -1492,6 +1512,7 @@ mod tests {
             Duration::from_secs(15 * 60)
         );
         assert_eq!(config.source_dir, PathBuf::from("source"));
+        assert_eq!(config.source_log_dir, PathBuf::from("data/source-log"));
     }
 
     #[test]

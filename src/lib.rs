@@ -136,6 +136,10 @@ async fn print_status_report(report: &RuntimeConfigReport) -> Result<(), BridgeE
         status.runtime_checks.source_dir_writable
     );
     println!(
+        "  source_log_dir_writable: {}",
+        status.runtime_checks.source_log_dir_writable
+    );
+    println!(
         "  raw_archive_dir_writable: {}",
         status.runtime_checks.raw_archive_dir_writable
     );
@@ -221,6 +225,12 @@ fn run_doctor(report: &RuntimeConfigReport, env_file: Option<&Path>) -> Result<(
         "sage-wiki source dir",
         &config.source_dir,
         false,
+        &mut failed,
+    );
+    check_dir(
+        "sage-wiki source log dir",
+        &config.source_log_dir,
+        true,
         &mut failed,
     );
     check_dir(
@@ -402,6 +412,7 @@ pub async fn run_with_report(
         config.worker_id.clone(),
         config.bridge_version.clone(),
     )
+    .with_log_source_writer(SourceWriter::daily_log(&config.source_log_dir))
     .with_processed_artifact_store(ProcessedArtifactStore::new(&config.processed_artifact_dir))
     .with_retry_policy(RetryPolicy {
         base_delay: config.worker_retry_base,

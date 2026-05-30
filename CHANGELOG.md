@@ -6,6 +6,17 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-31
+
+### Changed
+
+- `SAGE_WIKI_SOURCE_DIR` now receives AI-friendly compact daily Markdown.
+- The previous verbose daily log Markdown format is preserved under `SAGE_WIKI_SOURCE_LOG_DIR`.
+
+### Added
+
+- New `--sage-wiki-source-log-dir` / `BRIDGE_SAGE_WIKI_SOURCE_LOG_DIR` setting. Default: `data/source-log`.
+
 ## [0.4.2] - 2026-05-30
 
 ### Fixed

@@ -25,6 +25,8 @@ BRIDGE_BIND_ADDR=127.0.0.1:8087
 BRIDGE_WECHAT_CALLBACK_PATH=/wechat
 BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED=true
 BRIDGE_SAGE_WIKI_SOURCE_DIR=/data/workspace/sage-wiki/source
+# Optional old verbose source format.
+# BRIDGE_SAGE_WIKI_SOURCE_LOG_DIR=/data/workspace/sage-wiki-bridge-wxo/data/source-log
 
 WECHAT_TOKEN=...
 WECHAT_APP_ID=...

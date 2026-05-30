@@ -69,6 +69,8 @@ BRIDGE_BIND_ADDR=127.0.0.1:8087
 BRIDGE_WECHAT_CALLBACK_PATH=/wechat
 BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED=true
 BRIDGE_SAGE_WIKI_SOURCE_DIR=/data/workspace/sage-wiki/source
+# 可选：旧版 daily source 格式的详细审计日志。
+# BRIDGE_SAGE_WIKI_SOURCE_LOG_DIR=/data/workspace/sage-wiki-bridge-wxo/data/source-log
 
 WECHAT_TOKEN=...
 WECHAT_APP_ID=...
@@ -151,6 +153,7 @@ binary 原生读取这同一份显式 env file 中的 secrets 和 `BRIDGE_*` 运
 - `BRIDGE_WECHAT_CALLBACK_PATH`
 - `BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED`
 - `BRIDGE_SAGE_WIKI_SOURCE_DIR`
+- `BRIDGE_SAGE_WIKI_SOURCE_LOG_DIR`，如果默认 `data/source-log` 不适合
 - `ReadWritePaths`
 - `MemoryMax`
 

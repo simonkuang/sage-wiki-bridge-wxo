@@ -29,11 +29,32 @@ pub struct SourceWriteResult {
 #[derive(Debug, Clone)]
 pub struct SourceWriter {
     root: PathBuf,
+    format: SourceFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceFormat {
+    Ai,
+    DailyLog,
 }
 
 impl SourceWriter {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self::ai(root)
+    }
+
+    pub fn ai(root: impl Into<PathBuf>) -> Self {
+        Self {
+            root: root.into(),
+            format: SourceFormat::Ai,
+        }
+    }
+
+    pub fn daily_log(root: impl Into<PathBuf>) -> Self {
+        Self {
+            root: root.into(),
+            format: SourceFormat::DailyLog,
+        }
     }
 
     pub fn write_source(
@@ -49,12 +70,16 @@ impl SourceWriter {
 
         let current = match fs::read_to_string(&path) {
             Ok(content) => content,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                render_daily_document_header(&capture_date, metadata)
-            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => match self.format {
+                SourceFormat::Ai => render_ai_document_header(&capture_date),
+                SourceFormat::DailyLog => render_daily_log_document_header(&capture_date, metadata),
+            },
             Err(err) => return Err(err.into()),
         };
-        let entry = render_daily_entry(&message_key, artifact, metadata);
+        let entry = match self.format {
+            SourceFormat::Ai => render_ai_entry(&message_key, artifact, metadata),
+            SourceFormat::DailyLog => render_daily_log_entry(&message_key, artifact, metadata),
+        };
         let markdown = upsert_daily_entry(&current, &message_key, &entry);
         write_file_atomically(&path, markdown.as_bytes())?;
 
@@ -65,7 +90,18 @@ impl SourceWriter {
     }
 }
 
-fn render_daily_document_header(capture_date: &str, metadata: &SourceMetadata) -> String {
+fn render_ai_document_header(capture_date: &str) -> String {
+    let mut frontmatter = String::new();
+    frontmatter.push_str("---\n");
+    push_yaml_str(&mut frontmatter, "source", "wechat-official-account");
+    push_yaml_str(&mut frontmatter, "source_type", "wechat_ai_messages");
+    push_yaml_str(&mut frontmatter, "capture_date", capture_date);
+    frontmatter.push_str("---\n\n");
+
+    format!("{frontmatter}# WeChat Knowledge {capture_date}\n")
+}
+
+fn render_daily_log_document_header(capture_date: &str, metadata: &SourceMetadata) -> String {
     let mut frontmatter = String::new();
     frontmatter.push_str("---\n");
     push_yaml_str(&mut frontmatter, "source", "wechat-official-account");
@@ -77,7 +113,28 @@ fn render_daily_document_header(capture_date: &str, metadata: &SourceMetadata) -
     format!("{frontmatter}# WeChat captures {capture_date}\n")
 }
 
-fn render_daily_entry(
+fn render_ai_entry(
+    sanitized_message_key: &str,
+    artifact: &ProcessedArtifact,
+    metadata: &SourceMetadata,
+) -> String {
+    let mut entry = String::new();
+    entry.push_str(&format!("<!-- swb:start:{sanitized_message_key} -->\n\n"));
+    entry.push_str(&format!(
+        "## {} {}\n\n",
+        readable_message_type(&metadata.message_type),
+        metadata.received_at
+    ));
+    entry.push_str(artifact.markdown_body.trim());
+    entry.push_str("\n\n");
+    if let Some(service) = &metadata.external_service {
+        entry.push_str(&format!("_via {service}_\n\n"));
+    }
+    entry.push_str(&format!("<!-- swb:end:{sanitized_message_key} -->\n"));
+    entry
+}
+
+fn render_daily_log_entry(
     sanitized_message_key: &str,
     artifact: &ProcessedArtifact,
     metadata: &SourceMetadata,
@@ -125,8 +182,17 @@ fn render_daily_entry(
 }
 
 fn upsert_daily_entry(current: &str, message_key: &str, entry: &str) -> String {
-    let start_marker = format!("<!-- sage-wiki-bridge-message-start:{message_key} -->");
-    let end_marker = format!("<!-- sage-wiki-bridge-message-end:{message_key} -->");
+    let (start_marker, end_marker) = if entry.starts_with("<!-- swb:start:") {
+        (
+            format!("<!-- swb:start:{message_key} -->"),
+            format!("<!-- swb:end:{message_key} -->"),
+        )
+    } else {
+        (
+            format!("<!-- sage-wiki-bridge-message-start:{message_key} -->"),
+            format!("<!-- sage-wiki-bridge-message-end:{message_key} -->"),
+        )
+    };
     let Some(start) = current.find(&start_marker) else {
         let mut next = current.trim_end().to_string();
         next.push_str("\n\n");
@@ -149,6 +215,19 @@ fn upsert_daily_entry(current: &str, message_key: &str, entry: &str) -> String {
     next.push('\n');
     next.push_str(current[end..].trim_start_matches('\n'));
     next
+}
+
+fn readable_message_type(message_type: &str) -> &str {
+    match message_type {
+        "text" => "Text",
+        "image" => "Image",
+        "voice" => "Voice",
+        "video" => "Video",
+        "shortvideo" => "Short Video",
+        "location" => "Location",
+        "link" => "Link",
+        other => other,
+    }
 }
 
 fn push_yaml_str(out: &mut String, key: &str, value: &str) {
@@ -260,7 +339,7 @@ mod tests {
     #[test]
     fn writes_markdown_source_atomically() {
         let temp = tempfile::tempdir().unwrap();
-        let writer = SourceWriter::new(temp.path());
+        let writer = SourceWriter::daily_log(temp.path());
         let artifact = ProcessedArtifact::new(
             "20260527T133015Z_1000000000000000001",
             ProcessedArtifactKind::Text,
@@ -285,7 +364,7 @@ mod tests {
     #[test]
     fn upserts_existing_daily_message_entry() {
         let temp = tempfile::tempdir().unwrap();
-        let writer = SourceWriter::new(temp.path());
+        let writer = SourceWriter::daily_log(temp.path());
         let first = ProcessedArtifact::new("msg_1", ProcessedArtifactKind::Text, "old content");
         let second = ProcessedArtifact::new("msg_1", ProcessedArtifactKind::Text, "new content");
 
@@ -306,7 +385,7 @@ mod tests {
     #[test]
     fn rejects_unsafe_message_key() {
         let temp = tempfile::tempdir().unwrap();
-        let writer = SourceWriter::new(temp.path());
+        let writer = SourceWriter::daily_log(temp.path());
         let artifact = ProcessedArtifact::new("../escape", ProcessedArtifactKind::Text, "bad path");
 
         let err = writer.write_source(&artifact, &metadata()).unwrap_err();
@@ -320,8 +399,31 @@ mod tests {
         let mut metadata = metadata();
         metadata.message_type = "text\"quoted".to_string();
 
-        let markdown = render_daily_entry("msg_1", &artifact, &metadata);
+        let markdown = render_daily_log_entry("msg_1", &artifact, &metadata);
 
         assert!(markdown.contains("- message_type: \"text\\\"quoted\""));
+    }
+
+    #[test]
+    fn writes_ai_friendly_daily_source_by_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let writer = SourceWriter::new(temp.path());
+        let artifact = ProcessedArtifact::new(
+            "20260527T133015Z_1000000000000000001",
+            ProcessedArtifactKind::Text,
+            "hello sage-wiki",
+        );
+
+        let result = writer.write_source(&artifact, &metadata()).unwrap();
+        let content = fs::read_to_string(&result.path).unwrap();
+
+        assert!(content.contains("source_type: \"wechat_ai_messages\""));
+        assert!(content.contains("# WeChat Knowledge 2026-05-27"));
+        assert!(content.contains("## Text 2026-05-27T21:30:15+08:00"));
+        assert!(content.contains("hello sage-wiki"));
+        assert!(content.contains("<!-- swb:start:20260527T133015Z_1000000000000000001 -->"));
+        assert!(!content.contains("### Metadata"));
+        assert!(!content.contains("openid_hash"));
+        assert!(!content.contains("raw_dir"));
     }
 }

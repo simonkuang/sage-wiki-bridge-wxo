@@ -110,9 +110,10 @@ Filesystem stores:
 
 - raw archive under configured raw directory
 - processed artifacts under configured processed directory
-- final daily Markdown source under configured `sage-wiki` source directory
+- AI-friendly daily Markdown under configured `sage-wiki` source directory
+- verbose daily audit Markdown under configured source log directory
 
-The source writer groups messages into `YYYY-MM-DD.md` files by `received_at` date. It uses hidden per-message markers to upsert entries idempotently, and atomic write semantics to avoid `sage-wiki compile --watch` reading partial files.
+The source writer groups messages into `YYYY-MM-DD.md` files by `received_at` date. `SAGE_WIKI_SOURCE_DIR` receives compact AI-friendly content, while `SAGE_WIKI_SOURCE_LOG_DIR` preserves the previous metadata-rich log format. Both use hidden per-message markers to upsert entries idempotently, and atomic write semantics to avoid `sage-wiki compile --watch` reading partial files.
 
 ## 8. Runtime Configuration
 
@@ -136,6 +137,7 @@ Representative knobs include:
 - bind address and callback/admin/health paths
 - SQLite URL and pool size
 - raw/processed/source directories
+- source log directory
 - request body limit
 - worker interval, timeout, retry backoff, worker id, bridge version
 - WeChat API base, callback mode, token refresh skew

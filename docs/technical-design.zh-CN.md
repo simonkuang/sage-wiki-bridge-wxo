@@ -268,6 +268,7 @@ BRIDGE_BIND_ADDR=127.0.0.1:8087
 BRIDGE_WECHAT_CALLBACK_PATH=/wechat
 BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED=true
 BRIDGE_SAGE_WIKI_SOURCE_DIR=/data/workspace/sage-wiki/source
+BRIDGE_SAGE_WIKI_SOURCE_LOG_DIR=/data/workspace/sage-wiki-bridge-wxo/data/source-log
 
 WECHAT_APP_ID=wx...
 WECHAT_APP_SECRET=...
@@ -784,7 +785,8 @@ flowchart LR
   Pre --> Art["Processed Artifact Store"]
   Art --> DB2["SQLite processed_text/payload paths"]
   Art --> Writer["Source Writer"]
-  Writer --> Source["sage-wiki source .md"]
+  Writer --> Source["AI-friendly sage-wiki source .md"]
+  Writer --> SourceLog["Verbose source log .md"]
 ```
 
 流转规则:
@@ -792,7 +794,7 @@ flowchart LR
 - Receiver 只写 raw archive 元信息和 DB 初始状态。
 - Pre-processor 读取 DB job 和 raw paths, 生成 `ProcessedArtifact`。
 - Processed Artifact Store 保存中间产物路径, 并更新 `messages.processed_text`、`external_payloads`、`media_assets`。
-- Source Writer 读取 artifact, 原子写入 source, 再更新 `messages.source_path` 和 `status=source_written`。
+- Source Writer 读取 artifact, 原子写入 AI-friendly source 和 verbose source log, 再用 AI-friendly source path 更新 `messages.source_path` 和 `status=source_written`。
 - DB 是状态真源, 文件系统是 payload 真源。DB 中存路径、hash、size 和状态, 大 payload 不直接塞进 SQLite。
 
 ### 7.8 数据存储与保留
@@ -800,7 +802,8 @@ flowchart LR
 - SQLite: 存消息索引、状态、任务、白名单、session、payload 路径和错误摘要。
 - `data/raw`: 存 callback XML、message JSON、媒体原文件、外部服务原始响应。
 - `data/processed`: 存 pre-processor 产物, 包括 LLM 文本、ASR 转写、LBS 摘要、Jina Markdown、source draft。
-- sage-wiki source 目录: 只存最终 Markdown source, 按 `received_at` 日期写入 `YYYY-MM-DD.md`。
+- sage-wiki source 目录: 存 AI-friendly 精简 Markdown, 按 `received_at` 日期写入 `YYYY-MM-DD.md`。
+- source log 目录: 存旧版详细日志 Markdown, 按 `received_at` 日期写入 `YYYY-MM-DD.md`。
 - 默认不自动删除 raw/processed 数据。后续可增加 retention policy, 但 MVP 先保证可审计和可恢复。
 
 ### 7.9 缓存设计

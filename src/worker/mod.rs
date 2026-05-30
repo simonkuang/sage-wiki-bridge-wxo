@@ -75,6 +75,7 @@ impl MediaJobProcessor for NoopMediaJobProcessor {
 pub struct Worker {
     store: Store,
     source_writer: SourceWriter,
+    log_source_writer: Option<SourceWriter>,
     processed_artifact_store: Option<ProcessedArtifactStore>,
     external_clients: Arc<dyn ExternalClients>,
     media_processor: Arc<dyn MediaJobProcessor>,
@@ -114,6 +115,7 @@ impl Worker {
         Self {
             store,
             source_writer,
+            log_source_writer: None,
             processed_artifact_store: None,
             external_clients: Arc::new(NoopExternalClients),
             media_processor: Arc::new(NoopMediaJobProcessor),
@@ -133,6 +135,7 @@ impl Worker {
         Self {
             store,
             source_writer,
+            log_source_writer: None,
             processed_artifact_store: None,
             external_clients,
             media_processor: Arc::new(NoopMediaJobProcessor),
@@ -153,6 +156,7 @@ impl Worker {
         Self {
             store,
             source_writer,
+            log_source_writer: None,
             processed_artifact_store: None,
             external_clients,
             media_processor,
@@ -167,6 +171,11 @@ impl Worker {
         processed_artifact_store: ProcessedArtifactStore,
     ) -> Self {
         self.processed_artifact_store = Some(processed_artifact_store);
+        self
+    }
+
+    pub fn with_log_source_writer(mut self, log_source_writer: SourceWriter) -> Self {
+        self.log_source_writer = Some(log_source_writer);
         self
     }
 
@@ -232,6 +241,9 @@ impl Worker {
         }
         if artifact.external_service.is_some() {
             metadata.external_service = artifact.external_service.clone();
+        }
+        if let Some(log_source_writer) = &self.log_source_writer {
+            log_source_writer.write_source(&artifact, &metadata)?;
         }
         let result = self.source_writer.write_source(&artifact, &metadata)?;
         self.store
@@ -665,6 +677,7 @@ mod tests {
     async fn worker_processes_text_job_to_source() {
         let store = store_with_job(text_message()).await;
         let source_dir = tempfile::tempdir().unwrap();
+        let source_log_dir = tempfile::tempdir().unwrap();
         let processed_dir = tempfile::tempdir().unwrap();
         let worker = Worker::new(
             store.clone(),
@@ -672,6 +685,7 @@ mod tests {
             "worker-1",
             "0.1.0",
         )
+        .with_log_source_writer(SourceWriter::daily_log(source_log_dir.path()))
         .with_processed_artifact_store(ProcessedArtifactStore::new(processed_dir.path()));
 
         let outcome = worker
@@ -684,6 +698,13 @@ mod tests {
         };
         let source = std::fs::read_to_string(source_path).unwrap();
         assert!(source.contains("hello worker"));
+        assert!(source.contains("source_type: \"wechat_ai_messages\""));
+        assert!(!source.contains("### Metadata"));
+        let log_source =
+            std::fs::read_to_string(source_log_dir.path().join("2026-05-27.md")).unwrap();
+        assert!(log_source.contains("source_type: \"wechat_daily_messages\""));
+        assert!(log_source.contains("### Metadata"));
+        assert!(log_source.contains("openid_hash"));
         let processed =
             std::fs::read_to_string(processed_dir.path().join("msg_text_1").join("processed.md"))
                 .unwrap();
@@ -909,6 +930,7 @@ mod tests {
     async fn worker_processes_media_job_through_media_processor() {
         let store = store_with_job(image_message()).await;
         let source_dir = tempfile::tempdir().unwrap();
+        let source_log_dir = tempfile::tempdir().unwrap();
         let worker = Worker::with_processors(
             store,
             SourceWriter::new(source_dir.path()),
@@ -916,7 +938,8 @@ mod tests {
             Arc::new(FakeMediaProcessor),
             "worker-1",
             "0.1.0",
-        );
+        )
+        .with_log_source_writer(SourceWriter::daily_log(source_log_dir.path()));
 
         let outcome = worker
             .process_next("2026-05-27T21:30:16+08:00")
@@ -928,7 +951,10 @@ mod tests {
         };
         let source = std::fs::read_to_string(source_path).unwrap();
         assert!(source.contains("processed media media-image-1"));
-        assert!(source.contains("provider: \"gemini\""));
-        assert!(source.contains("model: \"gemini-test\""));
+        assert!(!source.contains("provider: \"gemini\""));
+        let log_source =
+            std::fs::read_to_string(source_log_dir.path().join("2026-05-27.md")).unwrap();
+        assert!(log_source.contains("provider: \"gemini\""));
+        assert!(log_source.contains("model: \"gemini-test\""));
     }
 }
