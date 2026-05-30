@@ -75,8 +75,9 @@ curl -H "Authorization: Bearer $ADMIN_VIEW_KEY" http://127.0.0.1:8087/admin/stat
 
 1. 执行 `sudo scripts/bridgectl.sh -V`，确认 `WECHAT_CALLBACK_PATH` 等于公网 callback path。
 2. 执行 `sudo scripts/bridgectl.sh tail`，再触发一次微信 callback。
-3. 看日志里有没有 `wechat callback message stored` 或 `wechat callback signature invalid`。
-4. 执行 `sudo scripts/bridgectl.sh status` 或请求 `/admin/status`，看 message/job 计数是否变化。
-5. 检查 `data/raw` 下是否有新增归档文件。
+3. 先看日志里有没有 `http request started` / `http request completed`。
+4. 如果有 HTTP access log，再看有没有 `wechat callback message stored` 或 `wechat callback signature invalid`。
+5. 执行 `sudo scripts/bridgectl.sh status` 或请求 `/admin/status`，看 message/job 计数是否变化。
+6. 检查 `data/raw` 下是否有新增归档文件。
 
-如果 receiver 没日志、DB 计数不变、raw 没新增，说明请求没有进入 Rust app 的 callback route。重点检查 OpenResty 的 `proxy_pass`、路径重写和 upstream status。
+如果连 `http request started` 都没有，说明请求没有进入 Rust app。重点检查 OpenResty 的 `proxy_pass`、路径重写和 upstream status。

@@ -75,8 +75,9 @@ If OpenResty shows 200 but the app seems silent:
 
 1. Run `sudo scripts/bridgectl.sh -V` and confirm `WECHAT_CALLBACK_PATH` matches the public callback path.
 2. Run `sudo scripts/bridgectl.sh tail` and trigger a WeChat callback.
-3. Look for `wechat callback message stored` or `wechat callback signature invalid`.
-4. Run `sudo scripts/bridgectl.sh status` or request `/admin/status` and check message/job counters.
-5. Check raw archive files under `data/raw`.
+3. First look for `http request started` / `http request completed`.
+4. If HTTP access logs exist, look for `wechat callback message stored` or `wechat callback signature invalid`.
+5. Run `sudo scripts/bridgectl.sh status` or request `/admin/status` and check message/job counters.
+6. Check raw archive files under `data/raw`.
 
-If there are no receiver logs and no DB counters change, the request did not reach the Rust app route. Check OpenResty `proxy_pass`, path rewriting, and upstream status.
+If there is no `http request started` log, the request did not reach the Rust app. Check OpenResty `proxy_pass`, path rewriting, and upstream status.

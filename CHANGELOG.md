@@ -6,6 +6,12 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-30
+
+### Fixed
+
+- Added global HTTP access logs for every request that reaches the Rust app, including wrong paths and unsupported methods, so OpenResty-to-app routing issues are visible in journald.
+
 ## [0.4.0] - 2026-05-30
 
 ### Added

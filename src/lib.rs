@@ -19,6 +19,13 @@ use std::{env, fs, path::Path, sync::Arc, time::Duration};
 
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
+use axum::{
+    body::Body,
+    http::Request,
+    middleware::{self, Next},
+    response::Response,
+};
+
 use crate::{
     admin::AdminState,
     archive::{ProcessedArtifactStore, RawArchive},
@@ -436,7 +443,8 @@ pub async fn run_with_report(
         store,
         healthz_path: config.healthz_path.clone(),
         readyz_path: config.readyz_path.clone(),
-    }));
+    }))
+    .layer(middleware::from_fn(access_log));
     let listener = tokio::net::TcpListener::bind(&config.bind_addr)
         .await
         .map_err(|err| {
@@ -453,6 +461,46 @@ pub async fn run_with_report(
     axum::serve(listener, app)
         .await
         .map_err(|err| BridgeError::Config(format!("server failed: {err}")))
+}
+
+async fn access_log(request: Request<Body>, next: Next) -> Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let path = uri.path().to_string();
+    let query = uri.query().map(str::to_string);
+    let user_agent = request
+        .headers()
+        .get("user-agent")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let forwarded_for = request
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let started = std::time::Instant::now();
+
+    tracing::info!(
+        component = "http",
+        method = %method,
+        path = %path,
+        query = query.as_deref().unwrap_or(""),
+        user_agent = user_agent.as_deref().unwrap_or(""),
+        x_forwarded_for = forwarded_for.as_deref().unwrap_or(""),
+        "http request started"
+    );
+
+    let response = next.run(request).await;
+    let status = response.status();
+    tracing::info!(
+        component = "http",
+        method = %method,
+        path = %path,
+        status = status.as_u16(),
+        duration_ms = started.elapsed().as_millis() as u64,
+        "http request completed"
+    );
+    response
 }
 
 async fn seed_configured_admin_openids(
