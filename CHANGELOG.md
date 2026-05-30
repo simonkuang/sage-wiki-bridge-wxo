@@ -6,6 +6,18 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-30
+
+### Added
+
+- `scripts/bridgectl.sh doctor` for deployment preflight checks covering binary, env file, required secrets, writable directories, and local URLs.
+- `scripts/bridgectl.sh health`, `ready`, `logs`, `tail`, `service-status`, and `argv` as standard operations and diagnostics commands.
+
+### Changed
+
+- `scripts/status.sh` now delegates to the same `bridgectl.sh status` path used by packaged deployments.
+- Operations documentation now presents a fixed deploy/check/debug workflow centered on a single `.env` and `bridgectl.sh`.
+
 ## [0.2.2] - 2026-05-30
 
 ### Fixed

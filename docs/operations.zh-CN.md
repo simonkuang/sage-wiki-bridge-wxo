@@ -1,0 +1,82 @@
+# 运维 Runbook
+
+## 原则
+
+生产环境只维护一份配置文件:
+
+```sh
+/data/workspace/sage-wiki-bridge-wxo/.env
+```
+
+systemd、手工诊断、本机探活全部走同一个入口:
+
+```sh
+/data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh
+```
+
+不要再从 systemd unit 里手工复制参数拼命令。
+
+## 最小生产配置
+
+`.env` 只保留 secrets 和必要运行覆盖项:
+
+```sh
+BRIDGE_BIND_ADDR=127.0.0.1:8087
+BRIDGE_WECHAT_CALLBACK_PATH=/wechat
+BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED=true
+BRIDGE_SAGE_WIKI_SOURCE_DIR=/data/workspace/sage-wiki/source
+
+WECHAT_TOKEN=...
+WECHAT_APP_ID=...
+WECHAT_APP_SECRET=...
+WECHAT_ENCODING_AES_KEY=...
+WECHAT_ADMIN_OPENIDS=...
+
+ADMIN_VIEW_KEY=...
+GEMINI_API_KEY=...
+TENCENT_LBS_KEY=...
+JINA_API_KEY=...
+```
+
+其它配置默认不写，除非二进制默认值不符合线上实际。
+
+## 部署或更新
+
+```sh
+cd /data/workspace/sage-wiki-bridge-wxo
+sudo install -m 0755 target/release/sage-wiki-bridge /usr/local/bin/sage-wiki-bridge
+sudo install -m 0755 scripts/bridgectl.sh /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh
+sudo install -m 0644 deploy/systemd/sage-wiki-bridge.service /etc/systemd/system/sage-wiki-bridge.service
+sudo systemctl daemon-reload
+sudo scripts/bridgectl.sh doctor
+sudo systemctl restart sage-wiki-bridge
+```
+
+## 标准检查
+
+```sh
+sudo scripts/bridgectl.sh service-status
+sudo scripts/bridgectl.sh health
+sudo scripts/bridgectl.sh ready
+sudo scripts/bridgectl.sh status
+sudo scripts/bridgectl.sh -V
+sudo scripts/bridgectl.sh tail
+```
+
+查看 `.env` 最终生成的 argv，且不会展开 secret 值:
+
+```sh
+sudo scripts/bridgectl.sh argv
+```
+
+## Callback 排查
+
+如果 OpenResty 显示 200，但 app 看起来没反应:
+
+1. 执行 `sudo scripts/bridgectl.sh -V`，确认 `WECHAT_CALLBACK_PATH` 等于公网 callback path。
+2. 执行 `sudo scripts/bridgectl.sh tail`，再触发一次微信 callback。
+3. 看日志里有没有 `wechat callback message stored` 或 `wechat callback signature invalid`。
+4. 执行 `sudo scripts/bridgectl.sh status`，看 message/job 计数是否变化。
+5. 检查 `data/raw` 下是否有新增归档文件。
+
+如果 receiver 没日志、DB 计数不变、raw 没新增，说明请求没有进入 Rust app 的 callback route。重点检查 OpenResty 的 `proxy_pass`、路径重写和 upstream status。

@@ -46,8 +46,14 @@ For the current production layout, keep or set at least these:
 After editing `/data/workspace/sage-wiki-bridge-wxo/.env`:
 
 ```sh
+cd /data/workspace/sage-wiki-bridge-wxo
+sudo scripts/bridgectl.sh doctor
 sudo systemctl restart sage-wiki-bridge
-sudo journalctl -u sage-wiki-bridge -f
+sudo scripts/bridgectl.sh service-status
+sudo scripts/bridgectl.sh health
+sudo scripts/bridgectl.sh ready
+sudo scripts/bridgectl.sh status
+sudo scripts/bridgectl.sh tail
 ```
 
 Use the same runner for diagnostics; this avoids manually reconstructing the long `ExecStart` argument list:
@@ -56,6 +62,18 @@ Use the same runner for diagnostics; this avoids manually reconstructing the lon
 sudo ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh -V
 sudo ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh status
 ```
+
+Command reference:
+
+- `bridgectl.sh doctor`: preflight check for binary, env, required secrets, writable dirs, and local URLs.
+- `bridgectl.sh -V`: print resolved config and sources.
+- `bridgectl.sh argv`: print generated argv, useful for checking whether a `BRIDGE_*` override is being passed.
+- `bridgectl.sh health`: call local `/healthz`.
+- `bridgectl.sh ready`: call local `/readyz`.
+- `bridgectl.sh status`: print database-backed message/job counters.
+- `bridgectl.sh service-status`: run `systemctl status --no-pager`.
+- `bridgectl.sh tail`: follow journald logs.
+- `bridgectl.sh logs`: print journald logs; pass extra journalctl flags after `logs`.
 
 The binary does not load `.env` implicitly. Config sources must be enabled explicitly:
 

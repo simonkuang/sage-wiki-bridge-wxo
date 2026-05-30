@@ -256,6 +256,7 @@ CLI flags > --env-file PATH > --use-process-env > built-in defaults
 - `-V`: 打印 package version、构建目标、解析后的配置值和每个值的来源, 不启动监听器或 worker。
 - `status`: 读取配置指向的 SQLite 数据库, 打印解析后的配置和 message/job 聚合计数。provider token 用量目前尚未持久化, 输出为 `not_tracked`。
 - systemd 打包部署使用 `scripts/bridgectl.sh`, 让 `run`、`-V`、`status` 共用 `/data/workspace/sage-wiki-bridge-wxo/.env` 的参数展开逻辑。
+- 标准运维命令为 `bridgectl.sh doctor`、`health`、`ready`、`logs`、`tail`、`service-status`、`argv`。
 
 ### 4.1 `.env`
 

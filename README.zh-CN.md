@@ -119,6 +119,20 @@ ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bri
 ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh status
 ```
 
+生产环境标准运维命令:
+
+```sh
+cd /data/workspace/sage-wiki-bridge-wxo
+sudo scripts/bridgectl.sh doctor
+sudo scripts/bridgectl.sh service-status
+sudo scripts/bridgectl.sh health
+sudo scripts/bridgectl.sh ready
+sudo scripts/bridgectl.sh status
+sudo scripts/bridgectl.sh tail
+```
+
+需要确认 `.env` 生成了哪些进程参数时，用 `scripts/bridgectl.sh argv`，它只打印 argv，不会展开 secret 值。
+
 ## 部署
 
 systemd 模板在 [deploy/systemd](deploy/systemd)。unit 使用 [scripts/bridgectl.sh](scripts/bridgectl.sh) 加载 `/data/workspace/sage-wiki-bridge-wxo/.env`；显式配置的 `BRIDGE_*` 变量会转成 CLI flags，非 `BRIDGE_*` key 由程序通过 `--env-file` 作为 secrets 读取。
@@ -178,6 +192,7 @@ sequenceDiagram
 
 - [产品设计 / PRD](docs/product-design.zh-CN.md): 背景、用户、目标、消息处理范围和产品决策。
 - [技术设计](docs/technical-design.zh-CN.md): 架构、模块、数据模型、日志、灾备、部署和测试策略。
+- [运维 Runbook](docs/operations.zh-CN.md): 生产部署、诊断和 callback 排查流程。
 - [Changelog](CHANGELOG.md): 重要变更和版本历史。
 - [Systemd 部署说明](deploy/systemd/README.md): Linux service 安装流程。
 - [.env.example](.env.example): 显式 `--env-file` 加载的 secrets 和环境强相关标识示例。

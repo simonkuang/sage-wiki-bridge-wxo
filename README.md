@@ -119,6 +119,20 @@ ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bri
 ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh status
 ```
 
+Standard production operations:
+
+```sh
+cd /data/workspace/sage-wiki-bridge-wxo
+sudo scripts/bridgectl.sh doctor
+sudo scripts/bridgectl.sh service-status
+sudo scripts/bridgectl.sh health
+sudo scripts/bridgectl.sh ready
+sudo scripts/bridgectl.sh status
+sudo scripts/bridgectl.sh tail
+```
+
+Use `scripts/bridgectl.sh argv` to print the exact argv generated from `.env` without exposing secret values.
+
 ## Deployment
 
 Systemd templates are in [deploy/systemd](deploy/systemd). The unit uses [scripts/bridgectl.sh](scripts/bridgectl.sh), which loads `/data/workspace/sage-wiki-bridge-wxo/.env`; explicitly configured `BRIDGE_*` variables become CLI flags, and non-`BRIDGE_*` keys are loaded by the binary as secrets via `--env-file`.
@@ -178,6 +192,7 @@ The product-level flow is explained in [the PRD](docs/product-design.en.md). The
 
 - [Product Design / PRD](docs/product-design.en.md): background, users, goals, message handling scope, and product decisions.
 - [Technical Design](docs/technical-design.en.md): architecture, modules, data model, logging, disaster recovery, deployment, and testing strategy.
+- [Operations Runbook](docs/operations.en.md): production deployment, diagnostics, and callback troubleshooting.
 - [Changelog](CHANGELOG.md): notable changes and version history.
 - [中文 README](README.zh-CN.md): Chinese project entry.
 - [Systemd Deployment Notes](deploy/systemd/README.md): Linux service installation outline.
