@@ -6,6 +6,10 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+### Documentation
+
+- Added AI Source Format v1 design covering thread boundaries, `/new`, `/status`, `/help`, the default 30-minute grouping window, and notification policy.
+
 ## [0.5.0] - 2026-05-31
 
 ### Changed

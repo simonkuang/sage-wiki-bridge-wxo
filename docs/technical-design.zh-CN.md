@@ -794,7 +794,7 @@ flowchart LR
 - Receiver 只写 raw archive 元信息和 DB 初始状态。
 - Pre-processor 读取 DB job 和 raw paths, 生成 `ProcessedArtifact`。
 - Processed Artifact Store 保存中间产物路径, 并更新 `messages.processed_text`、`external_payloads`、`media_assets`。
-- Source Writer 读取 artifact, 原子写入 AI-friendly source 和 verbose source log, 再用 AI-friendly source path 更新 `messages.source_path` 和 `status=source_written`。
+- Source Writer 读取 artifact, 原子写入 AI-friendly source 和 verbose source log, 再用 AI-friendly source path 更新 `messages.source_path` 和 `status=source_written`。AI source 的目标知识单元是保守的 `wechat-thread`, 不是单条消息; 分组使用同一 OpenID、默认 30 分钟时间窗口和 `/new` 显式边界。分隔符、消息 item 和通知策略见 [AI Source Format v1](ai-source-format.zh-CN.md)。
 - DB 是状态真源, 文件系统是 payload 真源。DB 中存路径、hash、size 和状态, 大 payload 不直接塞进 SQLite。
 
 ### 7.8 数据存储与保留
@@ -804,6 +804,7 @@ flowchart LR
 - `data/processed`: 存 pre-processor 产物, 包括 LLM 文本、ASR 转写、LBS 摘要、Jina Markdown、source draft。
 - sage-wiki source 目录: 存 AI-friendly 精简 Markdown, 按 `received_at` 日期写入 `YYYY-MM-DD.md`。
 - source log 目录: 存旧版详细日志 Markdown, 按 `received_at` 日期写入 `YYYY-MM-DD.md`。
+- AI source thread window: 默认 30 分钟, 作为静默配置, 通常不需要写入 `.env`。
 - 默认不自动删除 raw/processed 数据。后续可增加 retention policy, 但 MVP 先保证可审计和可恢复。
 
 ### 7.9 缓存设计

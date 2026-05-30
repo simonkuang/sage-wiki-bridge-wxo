@@ -77,6 +77,14 @@ OpenID is the MVP whitelist subject. UnionID is not assumed to be present. A con
 
 Non-whitelisted messages are not processed by external services. Honeypot response behavior is configurable.
 
+The planned first user-facing command set should stay small:
+
+- `/new`: end the current AI source context; the next non-command message starts a new thread.
+- `/status`: return recent processing summary and failures.
+- `/help`: return a short command list.
+
+Ordinary messages should not receive per-message replies by default. Target AI source thread grouping uses same OpenID plus a conservative 30-minute window, with `/new` as the explicit boundary. See [AI Source Format v1](ai-source-format.en.md) for format and implementation status.
+
 ## 6. Operational Expectations
 
 - Callback handling must respond quickly and avoid synchronous external calls.

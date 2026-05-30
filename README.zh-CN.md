@@ -24,11 +24,12 @@
 - 解析 text、image、voice、video、shortvideo、location、link。
 - OpenID 白名单和非白名单蜜罐逻辑。
 - raw archive、processed artifact、SQLite 状态和按天聚合的原子 Markdown source 写入。
+- AI source 与详细 source log 分离；目标 thread 格式、`/new` 边界和 command 策略见 [AI Source Format v1](docs/ai-source-format.zh-CN.md)。
 - Gemini 媒体理解、腾讯 LBS 逆地址解析、Jina Reader 链接读取。
 - 只读后台列表页和详情页。
 - 显式运行配置: `CLI flags > --env-file > --use-process-env > built-in defaults`。
 
-产品行为、用户场景和取舍见 [docs/product-design.zh-CN.md](docs/product-design.zh-CN.md)。模块边界、数据流、schema、重试和运维细节见 [docs/technical-design.zh-CN.md](docs/technical-design.zh-CN.md)。
+产品行为、用户场景和取舍见 [docs/product-design.zh-CN.md](docs/product-design.zh-CN.md)。AI source/thread 目标规范见 [docs/ai-source-format.zh-CN.md](docs/ai-source-format.zh-CN.md)。模块边界、数据流、schema、重试和运维细节见 [docs/technical-design.zh-CN.md](docs/technical-design.zh-CN.md)。
 
 ## 构建
 

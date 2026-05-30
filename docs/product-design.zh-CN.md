@@ -363,7 +363,19 @@ MVP 使用 OpenID 白名单:
 - 不需要把鉴权 key 放进微信内链接或前端页面。
 - magic command 通过 CLI 显式配置; 默认空值表示关闭自助加入。
 
-### 6.13 蜜罐逻辑
+### 6.13 用户 Command 与反馈规划
+
+普通消息默认不逐条回复, 避免公众号刷屏。规划第一阶段只保留少量 command:
+
+- `/new`: 结束当前 AI source 上下文, 下一条非 command 消息开启新 thread。
+- `/status`: 返回最近处理摘要和失败情况。
+- `/help`: 返回 command 简表。
+
+白名单加入 command 仍由 `--whitelist-join-command` 单独配置, 不和上述 command 混用。
+
+AI source 的目标 thread 边界默认按同一 OpenID 和 30 分钟窗口保守聚合, `/new` 是用户显式切分上下文的方式。详细格式和当前实现状态见 [AI Source Format v1](ai-source-format.zh-CN.md)。
+
+### 6.14 蜜罐逻辑
 
 蜜罐目标是降低误用和滥用成本, 不是复杂风控系统。
 

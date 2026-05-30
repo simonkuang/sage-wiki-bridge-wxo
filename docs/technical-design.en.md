@@ -113,7 +113,7 @@ Filesystem stores:
 - AI-friendly daily Markdown under configured `sage-wiki` source directory
 - verbose daily audit Markdown under configured source log directory
 
-The source writer groups messages into `YYYY-MM-DD.md` files by `received_at` date. `SAGE_WIKI_SOURCE_DIR` receives compact AI-friendly content, while `SAGE_WIKI_SOURCE_LOG_DIR` preserves the previous metadata-rich log format. Both use hidden per-message markers to upsert entries idempotently, and atomic write semantics to avoid `sage-wiki compile --watch` reading partial files.
+The source writer groups messages into `YYYY-MM-DD.md` files by `received_at` date. `SAGE_WIKI_SOURCE_DIR` receives compact AI-friendly content, while `SAGE_WIKI_SOURCE_LOG_DIR` preserves the previous metadata-rich log format. The target AI source unit is a conservative `wechat-thread` rather than a single message; grouping uses same OpenID, a default 30-minute window, and the `/new` command as an explicit boundary. See [AI Source Format v1](ai-source-format.en.md) for delimiter choices, message item rules, and notification behavior. Both source outputs use hidden markers to upsert entries idempotently, and atomic write semantics to avoid `sage-wiki compile --watch` reading partial files.
 
 ## 8. Runtime Configuration
 
@@ -138,6 +138,7 @@ Representative knobs include:
 - SQLite URL and pool size
 - raw/processed/source directories
 - source log directory
+- AI source thread window, default 30 minutes
 - request body limit
 - worker interval, timeout, retry backoff, worker id, bridge version
 - WeChat API base, callback mode, token refresh skew
@@ -153,6 +154,8 @@ Runtime inspection commands:
 - `doctor`, `health`, and `ready`: binary-native operations checks using the same `--env-file`.
 - `GET {ADMIN_BASE_PATH}/status`: protected JSON status endpoint with config sources, process info, writable-dir checks, and message/job counters.
 - Packaged systemd deployments start `/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env` directly. `scripts/bridgectl.sh` remains a thin compatibility wrapper plus journald/systemctl helpers.
+
+Planned WeChat user commands are intentionally small in the first phase: `/new` starts a new AI source thread, `/status` returns processing status, and `/help` lists commands. Ordinary messages do not receive per-message replies by default.
 
 ## 9. External Services
 

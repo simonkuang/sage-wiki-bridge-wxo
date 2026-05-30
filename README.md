@@ -24,11 +24,12 @@ Language: English | [中文](README.zh-CN.md)
 - Message parsing for text, image, voice, video, short video, location, and link messages.
 - OpenID whitelist with configurable honeypot behavior for non-whitelisted senders.
 - Raw archive, processed artifact storage, SQLite state, and atomic daily Markdown source writes.
+- Separate AI source and verbose source log outputs; see [AI Source Format v1](docs/ai-source-format.en.md) for the target thread format, `/new`, and command policy.
 - Gemini-backed media processing, Tencent LBS reverse geocoding, and Jina Reader link extraction.
 - Read-only admin message list and detail pages.
 - Explicit runtime configuration: `CLI flags > --env-file > --use-process-env > built-in defaults`.
 
-For product behavior and scope decisions, read [docs/product-design.en.md](docs/product-design.en.md). For module boundaries, data flow, schema, retry behavior, and operations details, read [docs/technical-design.en.md](docs/technical-design.en.md).
+For product behavior and scope decisions, read [docs/product-design.en.md](docs/product-design.en.md). Target AI source/thread rules are in [docs/ai-source-format.en.md](docs/ai-source-format.en.md). For module boundaries, data flow, schema, retry behavior, and operations details, read [docs/technical-design.en.md](docs/technical-design.en.md).
 
 ## Build
 

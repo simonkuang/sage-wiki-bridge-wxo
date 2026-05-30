@@ -71,6 +71,16 @@ sudo scripts/bridgectl.sh tail
 curl -H "Authorization: Bearer $ADMIN_VIEW_KEY" http://127.0.0.1:8087/admin/status
 ```
 
+## 用户 Command 规划
+
+用户侧 command 规划第一阶段保持克制:
+
+- `/new`: 开启新话题边界, 下一条非 command 消息进入新的 AI source thread。
+- `/status`: 查询最近处理摘要和失败情况。
+- `/help`: 查看 command 简表。
+
+普通消息默认不逐条回复。AI source 的目标 thread 格式和 30 分钟默认聚合窗口见 [AI Source Format v1](ai-source-format.zh-CN.md)。当前实现状态以该文档的 “实现备注” 为准。
+
 ## Callback 排查
 
 如果 OpenResty 显示 200，但 app 看起来没反应:
