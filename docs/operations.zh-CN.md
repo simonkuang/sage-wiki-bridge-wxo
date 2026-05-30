@@ -8,13 +8,13 @@
 /data/workspace/sage-wiki-bridge-wxo/.env
 ```
 
-systemd、手工诊断、本机探活全部走同一个入口:
+systemd 直接用同一份 env file 启动 binary:
 
 ```sh
-/data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh
+/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env
 ```
 
-不要再从 systemd unit 里手工复制参数拼命令。
+手工诊断也走同一套 binary 子命令。`scripts/bridgectl.sh` 只保留生产默认 env-file 路径和 journald/systemctl 辅助命令。不要再从 systemd unit 里手工复制参数拼命令。
 
 ## 最小生产配置
 
@@ -63,10 +63,10 @@ sudo scripts/bridgectl.sh -V
 sudo scripts/bridgectl.sh tail
 ```
 
-查看 `.env` 最终生成的 argv，且不会展开 secret 值:
+运行中的服务还提供受保护的 JSON 状态接口:
 
 ```sh
-sudo scripts/bridgectl.sh argv
+curl -H "Authorization: Bearer $ADMIN_VIEW_KEY" http://127.0.0.1:8087/admin/status
 ```
 
 ## Callback 排查
@@ -76,7 +76,7 @@ sudo scripts/bridgectl.sh argv
 1. 执行 `sudo scripts/bridgectl.sh -V`，确认 `WECHAT_CALLBACK_PATH` 等于公网 callback path。
 2. 执行 `sudo scripts/bridgectl.sh tail`，再触发一次微信 callback。
 3. 看日志里有没有 `wechat callback message stored` 或 `wechat callback signature invalid`。
-4. 执行 `sudo scripts/bridgectl.sh status`，看 message/job 计数是否变化。
+4. 执行 `sudo scripts/bridgectl.sh status` 或请求 `/admin/status`，看 message/job 计数是否变化。
 5. 检查 `data/raw` 下是否有新增归档文件。
 
 如果 receiver 没日志、DB 计数不变、raw 没新增，说明请求没有进入 Rust app 的 callback route。重点检查 OpenResty 的 `proxy_pass`、路径重写和 upstream status。

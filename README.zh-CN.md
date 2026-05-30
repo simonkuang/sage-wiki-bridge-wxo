@@ -81,7 +81,7 @@ JINA_API_KEY=...
 ADMIN_VIEW_KEY=...
 ```
 
-参考 [.env.example](.env.example)，systemd 和手工诊断共用这一份 dotenv。完整配置模型见 [技术设计](docs/technical-design.zh-CN.md)。
+参考 [.env.example](.env.example)，systemd 和手工诊断都会把这一份 dotenv 显式传给 binary。完整配置模型见 [技术设计](docs/technical-design.zh-CN.md)。
 
 ## 运行
 
@@ -108,15 +108,17 @@ sage-wiki-bridge --version
 sage-wiki-bridge version
 sage-wiki-bridge -V --env-file .env --database-url sqlite://data/bridge.sqlite3
 sage-wiki-bridge status --env-file .env --database-url sqlite://data/bridge.sqlite3
+sage-wiki-bridge doctor --env-file .env
+sage-wiki-bridge health --env-file .env
+sage-wiki-bridge ready --env-file .env
 ```
 
-`-V` 会打印 package version、构建目标、解析后的配置值和每个值的来源，但不会启动服务。`status` 会读取配置指向的 SQLite 数据库，打印解析后的配置以及 message/job 聚合计数。secrets 会被脱敏。
+`-V` 会打印 package version、构建目标、解析后的配置值和每个值的来源，但不会启动服务。`status` 会优先用 `ADMIN_VIEW_KEY` 请求正在运行的 `{ADMIN_BASE_PATH}/status`；如果进程不可达，再回退到配置指向的 SQLite 快照。secrets 会被脱敏。
 
-打包部署后，使用共用的 env-file runner，让手工诊断和 systemd 使用同一套参数展开逻辑:
+运行中的服务还提供受保护的 JSON 状态接口:
 
 ```sh
-ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh -V
-ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh status
+curl -H "Authorization: Bearer $ADMIN_VIEW_KEY" http://127.0.0.1:8087/admin/status
 ```
 
 生产环境标准运维命令:
@@ -131,11 +133,17 @@ sudo scripts/bridgectl.sh status
 sudo scripts/bridgectl.sh tail
 ```
 
-需要确认 `.env` 生成了哪些进程参数时，用 `scripts/bridgectl.sh argv`，它只打印 argv，不会展开 secret 值。
+`scripts/bridgectl.sh` 现在只是很薄的兼容入口。启动、`-V`、`status`、`doctor`、`health`、`ready` 都由 Rust binary 自己实现；脚本只保留 journald/systemctl 辅助命令和生产 env-file 默认路径。
 
 ## 部署
 
-systemd 模板在 [deploy/systemd](deploy/systemd)。unit 使用 [scripts/bridgectl.sh](scripts/bridgectl.sh) 加载 `/data/workspace/sage-wiki-bridge-wxo/.env`；显式配置的 `BRIDGE_*` 变量会转成 CLI flags，非 `BRIDGE_*` key 由程序通过 `--env-file` 作为 secrets 读取。
+systemd 模板在 [deploy/systemd](deploy/systemd)。unit 直接启动 binary:
+
+```sh
+/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env
+```
+
+binary 原生读取这同一份显式 env file 中的 secrets 和 `BRIDGE_*` 运行覆盖项。
 
 部署前需要核对生产 `.env`:
 

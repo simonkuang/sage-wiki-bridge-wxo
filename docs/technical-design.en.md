@@ -126,8 +126,8 @@ CLI flags > --env-file PATH > --use-process-env > built-in defaults
 
 Deployment should keep:
 
-- operational knobs in CLI flags
-- optional systemd runtime overrides in `BRIDGE_*` variables loaded from `/data/workspace/sage-wiki-bridge-wxo/.env`, then expanded by `bridgectl.sh` into CLI flags
+- operational defaults in the binary
+- only necessary runtime overrides as `BRIDGE_*` variables in `/data/workspace/sage-wiki-bridge-wxo/.env`
 - secrets in the same explicit env file loaded by `--env-file`
 - process environment disabled unless intentionally used
 
@@ -147,9 +147,10 @@ Runtime inspection commands:
 - `--version`: print the package version and exit.
 - `version`: command form of `--version`.
 - `-V`: print the package version, build target, resolved config values, and value sources, then exit without starting listeners or workers.
-- `status`: read the configured SQLite database and print resolved config plus aggregate message/job counters. Token usage is reported as `not_tracked` until provider usage accounting is persisted.
-- Packaged systemd deployments use `scripts/bridgectl.sh` so `run`, `-V`, and `status` share the same `/data/workspace/sage-wiki-bridge-wxo/.env` argument expansion.
-- `bridgectl.sh doctor`, `health`, `ready`, `logs`, `tail`, `service-status`, and `argv` are the standard operations commands.
+- `status`: first query the running `{ADMIN_BASE_PATH}/status` endpoint with `ADMIN_VIEW_KEY`; if the process is unreachable, fall back to the configured SQLite snapshot. Token usage is reported as `not_tracked` until provider usage accounting is persisted.
+- `doctor`, `health`, and `ready`: binary-native operations checks using the same `--env-file`.
+- `GET {ADMIN_BASE_PATH}/status`: protected JSON status endpoint with config sources, process info, writable-dir checks, and message/job counters.
+- Packaged systemd deployments start `/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env` directly. `scripts/bridgectl.sh` remains a thin compatibility wrapper plus journald/systemctl helpers.
 
 ## 9. External Services
 

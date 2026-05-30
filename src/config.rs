@@ -5,6 +5,8 @@ use std::{
     time::Duration,
 };
 
+use serde::Serialize;
+
 use crate::error::BridgeError;
 
 const FLAG_SPECS: &[(&str, &str)] = &[
@@ -73,12 +75,100 @@ const FLAG_SPECS: &[(&str, &str)] = &[
     ("--admin-max-per-page", "ADMIN_MAX_PER_PAGE"),
 ];
 
+const ENV_ALIAS_SPECS: &[(&str, &str)] = &[
+    ("BRIDGE_BIND_ADDR", "APP_BIND_ADDR"),
+    ("BRIDGE_DATABASE_URL", "DATABASE_URL"),
+    (
+        "BRIDGE_DATABASE_MAX_CONNECTIONS",
+        "DATABASE_MAX_CONNECTIONS",
+    ),
+    (
+        "BRIDGE_DATABASE_MIN_CONNECTIONS",
+        "DATABASE_MIN_CONNECTIONS",
+    ),
+    ("BRIDGE_RAW_ARCHIVE_DIR", "RAW_ARCHIVE_DIR"),
+    ("BRIDGE_RAW_ARCHIVE_FULL", "RAW_ARCHIVE_FULL"),
+    ("BRIDGE_PROCESSED_ARTIFACT_DIR", "PROCESSED_ARTIFACT_DIR"),
+    ("BRIDGE_SAGE_WIKI_SOURCE_DIR", "SAGE_WIKI_SOURCE_DIR"),
+    ("BRIDGE_WECHAT_CALLBACK_PATH", "WECHAT_CALLBACK_PATH"),
+    (
+        "BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED",
+        "WECHAT_ENCRYPTED_CALLBACK_ENABLED",
+    ),
+    ("BRIDGE_HONEYPOT_REPLY_ENABLED", "HONEYPOT_REPLY_ENABLED"),
+    ("BRIDGE_HONEYPOT_REPLY_TEXT", "HONEYPOT_REPLY_TEXT"),
+    ("BRIDGE_WORKER_ENABLED", "WORKER_ENABLED"),
+    ("BRIDGE_WORKER_ID", "WORKER_ID"),
+    ("BRIDGE_APP_VERSION", "BRIDGE_VERSION"),
+    ("BRIDGE_BRIDGE_VERSION", "BRIDGE_VERSION"),
+    ("BRIDGE_WORKER_INTERVAL_MS", "WORKER_INTERVAL_MS"),
+    (
+        "BRIDGE_WORKER_PROCESSING_TIMEOUT_SECONDS",
+        "WORKER_PROCESSING_TIMEOUT_SECONDS",
+    ),
+    (
+        "BRIDGE_WORKER_RETRY_BASE_SECONDS",
+        "WORKER_RETRY_BASE_SECONDS",
+    ),
+    (
+        "BRIDGE_WORKER_RETRY_MAX_SECONDS",
+        "WORKER_RETRY_MAX_SECONDS",
+    ),
+    ("BRIDGE_HTTP_TIMEOUT_SECONDS", "HTTP_TIMEOUT_SECONDS"),
+    (
+        "BRIDGE_REQUEST_BODY_LIMIT_BYTES",
+        "REQUEST_BODY_LIMIT_BYTES",
+    ),
+    ("BRIDGE_HEALTHZ_PATH", "HEALTHZ_PATH"),
+    ("BRIDGE_READYZ_PATH", "READYZ_PATH"),
+    ("BRIDGE_WECHAT_API_BASE", "WECHAT_API_BASE"),
+    ("BRIDGE_MAX_MEDIA_BYTES", "MAX_MEDIA_BYTES"),
+    (
+        "BRIDGE_WECHAT_TOKEN_REFRESH_SKEW_SECONDS",
+        "WECHAT_TOKEN_REFRESH_SKEW_SECONDS",
+    ),
+    ("BRIDGE_WHITELIST_JOIN_COMMAND", "WHITELIST_JOIN_COMMAND"),
+    ("BRIDGE_GEMINI_ENDPOINT_BASE", "GEMINI_ENDPOINT_BASE"),
+    ("BRIDGE_GEMINI_MODEL", "GEMINI_MODEL"),
+    ("BRIDGE_GEMINI_MAX_INLINE_BYTES", "GEMINI_MAX_INLINE_BYTES"),
+    ("BRIDGE_LLM_IMAGE_SYSTEM_PROMPT", "LLM_IMAGE_SYSTEM_PROMPT"),
+    ("BRIDGE_LLM_VOICE_SYSTEM_PROMPT", "LLM_VOICE_SYSTEM_PROMPT"),
+    ("BRIDGE_LLM_VIDEO_SYSTEM_PROMPT", "LLM_VIDEO_SYSTEM_PROMPT"),
+    ("BRIDGE_TENCENT_LBS_ENDPOINT", "TENCENT_LBS_ENDPOINT"),
+    ("BRIDGE_TENCENT_LBS_GET_POI", "TENCENT_LBS_GET_POI"),
+    (
+        "BRIDGE_TENCENT_LBS_RADIUS_METERS",
+        "TENCENT_LBS_RADIUS_METERS",
+    ),
+    ("BRIDGE_JINA_READER_ENDPOINT", "JINA_READER_ENDPOINT"),
+    ("BRIDGE_RUST_LOG", "RUST_LOG"),
+    ("BRIDGE_ADMIN_BASE_PATH", "ADMIN_BASE_PATH"),
+    ("BRIDGE_ADMIN_DEFAULT_PER_PAGE", "ADMIN_DEFAULT_PER_PAGE"),
+    ("BRIDGE_ADMIN_MAX_PER_PAGE", "ADMIN_MAX_PER_PAGE"),
+    ("BRIDGE_WECHAT_APP_ID", "WECHAT_APP_ID"),
+    ("BRIDGE_WECHAT_APPID", "WECHAT_APP_ID"),
+    ("BRIDGE_WECHAT_APP_SECRET", "WECHAT_APP_SECRET"),
+    ("BRIDGE_WECHAT_APPSECRET", "WECHAT_APP_SECRET"),
+    ("BRIDGE_WECHAT_TOKEN", "WECHAT_TOKEN"),
+    ("BRIDGE_WECHAT_ENCODING_AES_KEY", "WECHAT_ENCODING_AES_KEY"),
+    ("BRIDGE_ADMIN_VIEW_KEY", "ADMIN_VIEW_KEY"),
+    ("BRIDGE_GEMINI_API_KEY", "GEMINI_API_KEY"),
+    ("BRIDGE_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    ("BRIDGE_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+    ("BRIDGE_TENCENT_LBS_KEY", "TENCENT_LBS_KEY"),
+    ("BRIDGE_JINA_API_KEY", "JINA_API_KEY"),
+    ("BRIDGE_WECHAT_ADMIN_OPENIDS", "WECHAT_ADMIN_OPENIDS"),
+];
+
 const HELP: &str = r#"sage-wiki-bridge
 
 Usage:
   sage-wiki-bridge [OPTIONS]
   sage-wiki-bridge version [OPTIONS]
   sage-wiki-bridge status [OPTIONS]
+  sage-wiki-bridge doctor [OPTIONS]
+  sage-wiki-bridge health [OPTIONS]
+  sage-wiki-bridge ready [OPTIONS]
 
 Configuration sources are explicit and ordered:
   CLI flags > --env-file PATH > --use-process-env > built-in defaults.
@@ -220,7 +310,7 @@ pub struct RuntimeConfigReport {
     pub entries: Vec<ConfigReportEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfigReportEntry {
     pub key: &'static str,
     pub flag: &'static str,
@@ -244,6 +334,9 @@ pub struct CliConfig {
 pub enum CliCommand {
     Version,
     Status,
+    Doctor,
+    Health,
+    Ready,
 }
 
 impl CliConfig {
@@ -267,6 +360,9 @@ impl CliConfig {
             match arg.as_str() {
                 "version" if config.command.is_none() => config.command = Some(CliCommand::Version),
                 "status" if config.command.is_none() => config.command = Some(CliCommand::Status),
+                "doctor" if config.command.is_none() => config.command = Some(CliCommand::Doctor),
+                "health" if config.command.is_none() => config.command = Some(CliCommand::Health),
+                "ready" if config.command.is_none() => config.command = Some(CliCommand::Ready),
                 "--help" | "-h" => config.help = true,
                 "--version" => config.version = true,
                 "-V" => config.verbose_version = true,
@@ -329,12 +425,12 @@ where
     let mut resolved = ResolvedValues::default();
     if cli.use_process_env {
         for (key, value) in env::vars().filter(|(_, value)| !value.trim().is_empty()) {
-            resolved.insert(key, value, "process-env".to_string());
+            resolved.insert_input(key, value, "process-env".to_string());
         }
     }
     if let Some(env_file) = cli.env_file.as_deref() {
         for (key, value) in load_env_file(env_file)? {
-            resolved.insert(key, value, format!("env-file:{}", env_file.display()));
+            resolved.insert_input(key, value, format!("env-file:{}", env_file.display()));
         }
     }
     for (key, value) in cli.values {
@@ -362,11 +458,46 @@ impl ResolvedValues {
         self.sources.insert(key, source);
     }
 
+    fn insert_input(&mut self, key: String, value: String, source: String) {
+        match canonical_env_key(&key) {
+            Some((canonical, alias)) => {
+                let source = if alias {
+                    format!("{source} ({key})")
+                } else {
+                    source
+                };
+                self.insert(canonical.to_string(), value, source);
+            }
+            None => self.insert(key, value, source),
+        }
+    }
+
     fn source(&self, key: &str) -> String {
         self.sources
             .get(key)
             .cloned()
             .unwrap_or_else(|| "default".to_string())
+    }
+}
+
+fn canonical_env_key(key: &str) -> Option<(&'static str, bool)> {
+    if let Some((_, canonical)) = ENV_ALIAS_SPECS.iter().find(|(alias, _)| *alias == key) {
+        return Some((*canonical, true));
+    }
+    if let Some(canonical) = canonical_special_key(key) {
+        return Some((canonical, false));
+    }
+    None
+}
+
+fn canonical_special_key(key: &str) -> Option<&'static str> {
+    match key {
+        "WECHAT_APPID" => Some("WECHAT_APP_ID"),
+        "WECHAT_APPSECRET" => Some("WECHAT_APP_SECRET"),
+        "BRIDGE_VERSION" => Some("BRIDGE_VERSION"),
+        _ => FLAG_SPECS
+            .iter()
+            .find_map(|(_, canonical)| (*canonical == key).then_some(*canonical)),
     }
 }
 
@@ -1247,6 +1378,56 @@ mod tests {
         let cli = CliConfig::parse(["sage-wiki-bridge", "status"]).unwrap();
 
         assert_eq!(cli.command, Some(CliCommand::Status));
+    }
+
+    #[test]
+    fn parses_operations_commands() {
+        assert_eq!(
+            CliConfig::parse(["sage-wiki-bridge", "doctor"])
+                .unwrap()
+                .command,
+            Some(CliCommand::Doctor)
+        );
+        assert_eq!(
+            CliConfig::parse(["sage-wiki-bridge", "health"])
+                .unwrap()
+                .command,
+            Some(CliCommand::Health)
+        );
+        assert_eq!(
+            CliConfig::parse(["sage-wiki-bridge", "ready"])
+                .unwrap()
+                .command,
+            Some(CliCommand::Ready)
+        );
+    }
+
+    #[test]
+    fn env_file_supports_bridge_prefixed_aliases() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "BRIDGE_BIND_ADDR=127.0.0.1:19090\nBRIDGE_WECHAT_TOKEN=token-from-bridge-prefix\n",
+        )
+        .unwrap();
+        let env_file = temp.path().to_string_lossy().to_string();
+
+        let report =
+            runtime_config_report_from_args(["sage-wiki-bridge", "--env-file", env_file.as_str()])
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(report.runtime.app.bind_addr, "127.0.0.1:19090");
+        assert_eq!(
+            report.runtime.secrets.wechat_token.as_deref(),
+            Some("token-from-bridge-prefix")
+        );
+        let bind_addr = report
+            .entries
+            .iter()
+            .find(|entry| entry.key == "APP_BIND_ADDR")
+            .unwrap();
+        assert!(bind_addr.source.contains("BRIDGE_BIND_ADDR"));
     }
 
     #[test]

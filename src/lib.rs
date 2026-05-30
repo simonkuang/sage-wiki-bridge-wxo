@@ -9,12 +9,13 @@ pub mod media;
 pub mod preprocess;
 pub mod receiver;
 pub mod source;
+pub mod status;
 pub mod store;
 pub mod telemetry;
 pub mod wechat;
 pub mod worker;
 
-use std::{env, path::Path, sync::Arc};
+use std::{env, fs, path::Path, sync::Arc, time::Duration};
 
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
@@ -35,6 +36,7 @@ use crate::{
     media::{WechatApiConfig, WechatMediaClient},
     receiver::{ReceiverConfig, ReceiverState},
     source::SourceWriter,
+    status::{StatusContext, build_service_status},
     store::{StatusSnapshot, Store},
     worker::{
         ExternalClients, MediaJobProcessor, NoopExternalClients, NoopMediaJobProcessor,
@@ -65,8 +67,20 @@ where
         print_status_report(&report).await?;
         return Ok(());
     }
+    if cli.command == Some(CliCommand::Doctor) {
+        run_doctor(&report, cli.env_file.as_deref())?;
+        return Ok(());
+    }
+    if cli.command == Some(CliCommand::Health) {
+        check_local_endpoint(&report.runtime.app, &report.runtime.app.healthz_path).await?;
+        return Ok(());
+    }
+    if cli.command == Some(CliCommand::Ready) {
+        check_local_endpoint(&report.runtime.app, &report.runtime.app.readyz_path).await?;
+        return Ok(());
+    }
 
-    run_with_config(report.runtime).await
+    run_with_report(report).await
 }
 
 fn print_verbose_config_report(report: &RuntimeConfigReport) {
@@ -80,6 +94,11 @@ fn print_verbose_config_report(report: &RuntimeConfigReport) {
 }
 
 async fn print_status_report(report: &RuntimeConfigReport) -> Result<(), BridgeError> {
+    if let Some(running_status) = fetch_running_status(report).await? {
+        println!("{running_status}");
+        return Ok(());
+    }
+
     let config = &report.runtime.app;
     let store = Store::connect_with_pool_options(
         &config.database_url,
@@ -87,22 +106,214 @@ async fn print_status_report(report: &RuntimeConfigReport) -> Result<(), BridgeE
         config.database_min_connections,
     )
     .await?;
-    let snapshot = store.status_snapshot().await?;
+    let context = StatusContext::from_report(report);
+    let status = build_service_status(&store, &context).await?;
 
     println!("sage-wiki-bridge status");
     println!("instance:");
-    println!("  scope: configured_sqlite_snapshot");
-    println!("  package_version: {}", env!("CARGO_PKG_VERSION"));
-    println!("  status_command_pid: {}", std::process::id());
-    println!("  database_url: {}", config.database_url);
-    println!("  bind_addr: {}", config.bind_addr);
-    println!("  worker_enabled: {}", config.worker_enabled);
+    println!("  scope: configured_runtime_snapshot");
+    println!("  package_version: {}", status.service.package_version);
+    println!("  status_command_pid: {}", status.process.pid);
+    println!("  memory_rss_bytes: {:?}", status.process.memory_rss_bytes);
+    println!("  database_url: {}", status.service.database_url);
+    println!("  bind_addr: {}", status.service.bind_addr);
+    println!("  worker_enabled: {}", status.service.worker_enabled);
+    println!("  callback_path: {}", status.endpoints.callback_path);
+    println!("  admin_status_path: {}", status.endpoints.status_path);
     println!("config:");
     print_config_entries(&report.entries);
+    println!("runtime_checks:");
+    println!("  database_ready: {}", status.runtime_checks.database_ready);
+    println!(
+        "  source_dir_writable: {}",
+        status.runtime_checks.source_dir_writable
+    );
+    println!(
+        "  raw_archive_dir_writable: {}",
+        status.runtime_checks.raw_archive_dir_writable
+    );
+    println!(
+        "  processed_artifact_dir_writable: {}",
+        status.runtime_checks.processed_artifact_dir_writable
+    );
     println!("metrics:");
-    print_status_snapshot(&snapshot);
+    print_status_snapshot(&status.metrics);
 
     Ok(())
+}
+
+async fn fetch_running_status(report: &RuntimeConfigReport) -> Result<Option<String>, BridgeError> {
+    let Some(admin_view_key) = report
+        .runtime
+        .secrets
+        .admin_view_key
+        .as_deref()
+        .filter(|key| !key.is_empty())
+    else {
+        return Ok(None);
+    };
+    let config = &report.runtime.app;
+    let url = local_url(config, &format!("{}/status", config.admin_base_path));
+    let client = reqwest::Client::builder()
+        .timeout(config.http_timeout.min(Duration::from_secs(3)))
+        .build()
+        .map_err(|err| BridgeError::ExternalRequest(err.to_string()))?;
+    let Ok(response) = client.get(&url).bearer_auth(admin_view_key).send().await else {
+        return Ok(None);
+    };
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let text = response
+        .text()
+        .await
+        .map_err(|err| BridgeError::ExternalRequest(err.to_string()))?;
+    match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(value) => Ok(Some(
+            serde_json::to_string_pretty(&value)
+                .map_err(|err| BridgeError::ExternalPayloadInvalid(err.to_string()))?,
+        )),
+        Err(_) => Ok(Some(text)),
+    }
+}
+
+fn run_doctor(report: &RuntimeConfigReport, env_file: Option<&Path>) -> Result<(), BridgeError> {
+    let mut failed = false;
+    let config = &report.runtime.app;
+    let secrets = &report.runtime.secrets;
+
+    println!("sage-wiki-bridge doctor");
+    println!("package_version: {}", env!("CARGO_PKG_VERSION"));
+    println!("env_file: {}", display_optional_path(env_file));
+    println!("bind_addr: {}", config.bind_addr);
+    println!("callback_path: {}", config.callback_path);
+    println!("database_url: {}", config.database_url);
+    println!("health_url: {}", local_url(config, &config.healthz_path));
+    println!("ready_url: {}", local_url(config, &config.readyz_path));
+
+    check_required("WECHAT_TOKEN", secrets.wechat_token.as_deref(), &mut failed);
+    check_required(
+        "WECHAT_ADMIN_OPENIDS",
+        (!secrets.admin_openids.is_empty()).then_some("<configured>"),
+        &mut failed,
+    );
+    check_required(
+        "ADMIN_VIEW_KEY",
+        secrets.admin_view_key.as_deref(),
+        &mut failed,
+    );
+    if config.encrypted_callback_enabled {
+        check_required(
+            "WECHAT_ENCODING_AES_KEY",
+            secrets.wechat_encoding_aes_key.as_deref(),
+            &mut failed,
+        );
+    }
+
+    check_dir(
+        "sage-wiki source dir",
+        &config.source_dir,
+        false,
+        &mut failed,
+    );
+    check_dir(
+        "raw archive dir",
+        &config.raw_archive_dir,
+        true,
+        &mut failed,
+    );
+    check_dir(
+        "processed artifact dir",
+        &config.processed_artifact_dir,
+        true,
+        &mut failed,
+    );
+    if let Some(parent) = sqlite_database_parent(&config.database_url) {
+        check_dir("database dir", &parent, true, &mut failed);
+    }
+
+    if failed {
+        return Err(BridgeError::Config(
+            "doctor found one or more blocking problems".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+async fn check_local_endpoint(config: &AppConfig, path: &str) -> Result<(), BridgeError> {
+    let url = local_url(config, path);
+    let client = reqwest::Client::builder()
+        .timeout(config.http_timeout)
+        .build()
+        .map_err(|err| BridgeError::ExternalRequest(err.to_string()))?;
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|err| BridgeError::ExternalRequest(format!("{url}: {err}")))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| BridgeError::ExternalRequest(err.to_string()))?;
+    println!("{status} {url}");
+    println!("{body}");
+    if !status.is_success() {
+        return Err(BridgeError::ExternalRequest(format!(
+            "{url} returned {status}"
+        )));
+    }
+    Ok(())
+}
+
+fn local_url(config: &AppConfig, path: &str) -> String {
+    let bind_addr = config
+        .bind_addr
+        .strip_prefix("0.0.0.0:")
+        .map(|port| format!("127.0.0.1:{port}"))
+        .unwrap_or_else(|| config.bind_addr.clone());
+    format!("http://{bind_addr}{path}")
+}
+
+fn display_optional_path(path: Option<&Path>) -> String {
+    path.map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<not loaded>".to_string())
+}
+
+fn check_required(name: &str, value: Option<&str>, failed: &mut bool) {
+    if value.is_some_and(|value| !value.trim().is_empty()) {
+        println!("ok: {name} is set");
+    } else {
+        println!("error: {name} is required");
+        *failed = true;
+    }
+}
+
+fn check_dir(label: &str, path: &Path, create: bool, failed: &mut bool) {
+    if create {
+        let _ = fs::create_dir_all(path);
+    }
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.permissions().readonly() => {
+            println!("ok: {label} exists and is writable: {}", path.display());
+        }
+        Ok(metadata) if metadata.is_dir() => {
+            println!(
+                "error: {label} exists but is not writable: {}",
+                path.display()
+            );
+            *failed = true;
+        }
+        _ => {
+            println!("error: {label} does not exist: {}", path.display());
+            *failed = true;
+        }
+    }
+}
+
+fn sqlite_database_parent(database_url: &str) -> Option<std::path::PathBuf> {
+    let path = database_url.strip_prefix("sqlite://")?;
+    Path::new(path).parent().map(Path::to_path_buf)
 }
 
 fn print_config_entries(entries: &[ConfigReportEntry]) {
@@ -148,8 +359,19 @@ fn print_grouped_counts(counts: &[(String, i64)]) {
 }
 
 pub async fn run_with_config(runtime_config: RuntimeConfig) -> Result<(), error::BridgeError> {
-    let secrets = runtime_config.secrets;
-    let config = runtime_config.app;
+    run_with_report(RuntimeConfigReport {
+        entries: Vec::new(),
+        runtime: runtime_config,
+    })
+    .await
+}
+
+pub async fn run_with_report(
+    runtime_config: RuntimeConfigReport,
+) -> Result<(), error::BridgeError> {
+    let secrets = runtime_config.runtime.secrets;
+    let config = runtime_config.runtime.app;
+    let status_context = StatusContext::from_config_and_entries(&config, runtime_config.entries);
     telemetry::init(&config.log_filter);
     let wechat_token = secrets.require_wechat_token()?.to_string();
 
@@ -208,6 +430,7 @@ pub async fn run_with_config(runtime_config: RuntimeConfig) -> Result<(), error:
         view_key: secrets.admin_view_key.clone(),
         default_per_page: config.admin_default_per_page,
         max_per_page: config.admin_max_per_page,
+        status_context,
     }))
     .merge(health::router(HealthState {
         store,

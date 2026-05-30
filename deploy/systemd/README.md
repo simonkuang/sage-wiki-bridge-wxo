@@ -56,7 +56,7 @@ sudo scripts/bridgectl.sh status
 sudo scripts/bridgectl.sh tail
 ```
 
-Use the same runner for diagnostics; this avoids manually reconstructing the long `ExecStart` argument list:
+Use the same binary-backed wrapper for diagnostics; this avoids manually reconstructing runtime config:
 
 ```sh
 sudo ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh -V
@@ -65,12 +65,12 @@ sudo ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wik
 
 Command reference:
 
-- `bridgectl.sh doctor`: preflight check for binary, env, required secrets, writable dirs, and local URLs.
-- `bridgectl.sh -V`: print resolved config and sources.
-- `bridgectl.sh argv`: print generated argv, useful for checking whether a `BRIDGE_*` override is being passed.
-- `bridgectl.sh health`: call local `/healthz`.
-- `bridgectl.sh ready`: call local `/readyz`.
-- `bridgectl.sh status`: print database-backed message/job counters.
+- `sage-wiki-bridge doctor --env-file /data/workspace/sage-wiki-bridge-wxo/.env`: preflight check for required secrets, writable dirs, and local URLs.
+- `sage-wiki-bridge -V --env-file /data/workspace/sage-wiki-bridge-wxo/.env`: print resolved config and sources.
+- `sage-wiki-bridge health --env-file /data/workspace/sage-wiki-bridge-wxo/.env`: call local `/healthz`.
+- `sage-wiki-bridge ready --env-file /data/workspace/sage-wiki-bridge-wxo/.env`: call local `/readyz`.
+- `sage-wiki-bridge status --env-file /data/workspace/sage-wiki-bridge-wxo/.env`: print database-backed process/config/message/job counters.
+- `GET /admin/status`: return protected JSON status; authenticate with `?key=` or `Authorization: Bearer`.
 - `bridgectl.sh service-status`: run `systemctl status --no-pager`.
 - `bridgectl.sh tail`: follow journald logs.
 - `bridgectl.sh logs`: print journald logs; pass extra journalctl flags after `logs`.
@@ -81,6 +81,6 @@ The binary does not load `.env` implicitly. Config sources must be enabled expli
 /usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env
 ```
 
-Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit delegates to `bridgectl.sh`; that script reads `/data/workspace/sage-wiki-bridge-wxo/.env`, expands only explicitly configured `BRIDGE_*` variables into CLI flags, and passes the same file to the binary with `--env-file` for secrets. Avoid defining app config keys that duplicate CLI flags unless you intentionally want the CLI flag to override the env-file value.
+Every config value also has a CLI flag. CLI flags override values from `--env-file`; use `--use-process-env` only when you intentionally want process environment variables to participate. The packaged systemd unit starts the binary directly, and the binary natively reads secrets plus `BRIDGE_*` runtime overrides from `/data/workspace/sage-wiki-bridge-wxo/.env`.
 
 The unit sets `MemoryMax=256M` to match the target VPS budget. If the configured `BRIDGE_SAGE_WIKI_SOURCE_DIR` differs, update `ReadWritePaths` before starting.

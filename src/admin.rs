@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use axum::{
-    Router,
+    Json, Router,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::get,
 };
@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 use crate::{
     error::BridgeError,
+    status::{StatusContext, build_service_status},
     store::{MessageDetail, MessageListQuery, Store},
 };
 
@@ -21,6 +22,7 @@ pub struct AdminState {
     pub view_key: Option<String>,
     pub default_per_page: u32,
     pub max_per_page: u32,
+    pub status_context: StatusContext,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,12 +41,19 @@ struct DetailQuery {
     key: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct StatusQuery {
+    key: Option<String>,
+}
+
 pub fn router(state: AdminState) -> Router {
     let messages_path = format!("{}/messages", state.base_path);
     let message_detail_path = format!("{}/messages/{{id}}", state.base_path);
+    let status_path = format!("{}/status", state.base_path);
     Router::new()
         .route(&messages_path, get(list_messages))
         .route(&message_detail_path, get(message_detail))
+        .route(&status_path, get(status))
         .with_state(Arc::new(state))
 }
 
@@ -115,11 +124,48 @@ async fn message_detail(
     }
 }
 
+async fn status(
+    State(state): State<Arc<AdminState>>,
+    Query(query): Query<StatusQuery>,
+    headers: HeaderMap,
+) -> Response {
+    if !authorized_request(query.key.as_deref(), &headers, state.view_key.as_deref()) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    match build_service_status(&state.store, &state.status_context).await {
+        Ok(report) => Json(report).into_response(),
+        Err(err) => error_response(err),
+    }
+}
+
 fn authorized(provided: Option<&str>, expected: Option<&str>) -> bool {
     let Some(expected) = expected.filter(|value| !value.is_empty()) else {
         return false;
     };
     provided == Some(expected)
+}
+
+fn authorized_request(
+    query_key: Option<&str>,
+    headers: &HeaderMap,
+    expected: Option<&str>,
+) -> bool {
+    if authorized(query_key, expected) {
+        return true;
+    }
+    let Some(expected) = expected.filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let Some(header_value) = headers.get(header::AUTHORIZATION) else {
+        return false;
+    };
+    let Ok(header_value) = header_value.to_str() else {
+        return false;
+    };
+    header_value
+        .strip_prefix("Bearer ")
+        .is_some_and(|token| token == expected)
 }
 
 fn render_list_page(
@@ -334,12 +380,17 @@ mod tests {
     }
 
     fn admin_state(store: Store) -> AdminState {
+        let app = crate::config::runtime_config_from_args(["sage-wiki-bridge"])
+            .unwrap()
+            .unwrap()
+            .app;
         AdminState {
             store,
             base_path: "/admin".to_string(),
             view_key: Some("view-key".to_string()),
             default_per_page: 20,
             max_per_page: 100,
+            status_context: StatusContext::from_config_and_entries(&app, Vec::new()),
         }
     }
 
@@ -380,5 +431,45 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(html.contains("hello list"));
         assert!(html.contains("/admin/messages/1?key=view-key"));
+    }
+
+    #[tokio::test]
+    async fn admin_status_requires_key() {
+        let app = router(admin_state(test_store().await));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_status_returns_json() {
+        let app = router(admin_state(test_store().await));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/status")
+                    .header(header::AUTHORIZATION, "Bearer view-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["metrics"]["total_messages"], 1);
+        assert_eq!(json["endpoints"]["status_path"], "/admin/status");
     }
 }

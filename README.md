@@ -81,7 +81,7 @@ JINA_API_KEY=...
 ADMIN_VIEW_KEY=...
 ```
 
-See [.env.example](.env.example) for the single dotenv file used by both systemd and manual diagnostics. The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
+See [.env.example](.env.example) for the single dotenv file passed to the binary by both systemd and manual diagnostics. The full configuration model and rationale are described in [the technical design configuration section](docs/technical-design.en.md).
 
 ## Run
 
@@ -108,15 +108,17 @@ sage-wiki-bridge --version
 sage-wiki-bridge version
 sage-wiki-bridge -V --env-file .env --database-url sqlite://data/bridge.sqlite3
 sage-wiki-bridge status --env-file .env --database-url sqlite://data/bridge.sqlite3
+sage-wiki-bridge doctor --env-file .env
+sage-wiki-bridge health --env-file .env
+sage-wiki-bridge ready --env-file .env
 ```
 
-`-V` prints the package version, build target, resolved config values, and the source of each value without starting the service. `status` reads the configured SQLite database and prints resolved config plus aggregate message/job counters. Secrets are redacted.
+`-V` prints the package version, build target, resolved config values, and the source of each value without starting the service. `status` first tries the running `{ADMIN_BASE_PATH}/status` endpoint with `ADMIN_VIEW_KEY`; if the process is not reachable, it falls back to the configured SQLite snapshot. Secrets are redacted.
 
-For packaged deployments, use the shared env-file runner so manual diagnostics and systemd use the same argument mapping:
+The running service also exposes a protected JSON status endpoint:
 
 ```sh
-ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh -V
-ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env /data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh status
+curl -H "Authorization: Bearer $ADMIN_VIEW_KEY" http://127.0.0.1:8087/admin/status
 ```
 
 Standard production operations:
@@ -131,11 +133,17 @@ sudo scripts/bridgectl.sh status
 sudo scripts/bridgectl.sh tail
 ```
 
-Use `scripts/bridgectl.sh argv` to print the exact argv generated from `.env` without exposing secret values.
+`scripts/bridgectl.sh` is a thin compatibility wrapper. Startup, `-V`, `status`, `doctor`, `health`, and `ready` are implemented by the Rust binary itself; the wrapper keeps only journald/systemctl helpers and the default production env-file path.
 
 ## Deployment
 
-Systemd templates are in [deploy/systemd](deploy/systemd). The unit uses [scripts/bridgectl.sh](scripts/bridgectl.sh), which loads `/data/workspace/sage-wiki-bridge-wxo/.env`; explicitly configured `BRIDGE_*` variables become CLI flags, and non-`BRIDGE_*` keys are loaded by the binary as secrets via `--env-file`.
+Systemd templates are in [deploy/systemd](deploy/systemd). The unit starts the binary directly:
+
+```sh
+/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env
+```
+
+The binary natively reads secrets and `BRIDGE_*` operational overrides from the same explicit env file.
 
 Before installing, review the production `.env` values:
 

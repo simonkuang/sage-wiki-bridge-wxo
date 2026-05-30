@@ -8,13 +8,13 @@ Production uses one configuration file:
 /data/workspace/sage-wiki-bridge-wxo/.env
 ```
 
-Systemd, manual diagnostics, and local checks all go through:
+Systemd starts the binary directly with the same env file:
 
 ```sh
-/data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh
+/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env
 ```
 
-Do not manually reconstruct the process argv from the systemd unit.
+Manual diagnostics use the same binary commands. `scripts/bridgectl.sh` remains as a thin compatibility wrapper for the default env-file path plus journald/systemctl helpers. Do not manually reconstruct process argv from the systemd unit.
 
 ## Minimal Production Config
 
@@ -63,10 +63,10 @@ sudo scripts/bridgectl.sh -V
 sudo scripts/bridgectl.sh tail
 ```
 
-Use this to inspect argv without exposing secret values:
+The running service also exposes protected JSON status:
 
 ```sh
-sudo scripts/bridgectl.sh argv
+curl -H "Authorization: Bearer $ADMIN_VIEW_KEY" http://127.0.0.1:8087/admin/status
 ```
 
 ## Callback Debugging
@@ -76,7 +76,7 @@ If OpenResty shows 200 but the app seems silent:
 1. Run `sudo scripts/bridgectl.sh -V` and confirm `WECHAT_CALLBACK_PATH` matches the public callback path.
 2. Run `sudo scripts/bridgectl.sh tail` and trigger a WeChat callback.
 3. Look for `wechat callback message stored` or `wechat callback signature invalid`.
-4. Run `sudo scripts/bridgectl.sh status` and check message/job counters.
+4. Run `sudo scripts/bridgectl.sh status` or request `/admin/status` and check message/job counters.
 5. Check raw archive files under `data/raw`.
 
 If there are no receiver logs and no DB counters change, the request did not reach the Rust app route. Check OpenResty `proxy_pass`, path rewriting, and upstream status.

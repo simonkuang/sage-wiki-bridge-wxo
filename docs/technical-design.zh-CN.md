@@ -254,17 +254,20 @@ CLI flags > --env-file PATH > --use-process-env > built-in defaults
 - `--version`: 打印 package version 后退出。
 - `version`: `--version` 的指令形式。
 - `-V`: 打印 package version、构建目标、解析后的配置值和每个值的来源, 不启动监听器或 worker。
-- `status`: 读取配置指向的 SQLite 数据库, 打印解析后的配置和 message/job 聚合计数。provider token 用量目前尚未持久化, 输出为 `not_tracked`。
-- systemd 打包部署使用 `scripts/bridgectl.sh`, 让 `run`、`-V`、`status` 共用 `/data/workspace/sage-wiki-bridge-wxo/.env` 的参数展开逻辑。
-- 标准运维命令为 `bridgectl.sh doctor`、`health`、`ready`、`logs`、`tail`、`service-status`、`argv`。
+- `status`: 优先用 `ADMIN_VIEW_KEY` 请求正在运行的 `{ADMIN_BASE_PATH}/status`; 如果进程不可达, 再回退到配置指向的 SQLite 快照。provider token 用量目前尚未持久化, 输出为 `not_tracked`。
+- `doctor`、`health`、`ready`: binary 原生运维检查命令, 使用同一份 `--env-file`。
+- `GET {ADMIN_BASE_PATH}/status`: 受保护的 JSON 状态接口, 输出配置来源、进程信息、目录可写检查和 message/job 计数。
+- systemd 打包部署直接启动 `/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env`。`scripts/bridgectl.sh` 只保留兼容入口和 journald/systemctl 辅助命令。
 
 ### 4.1 `.env`
 
-密钥只放环境变量或 `.env`:
+生产只维护一份显式 env file。secrets 和必要运行覆盖项示例:
 
 ```bash
-BRIDGE_CONFIG=./config.yaml
-BRIDGE_HTTP_ADDR=127.0.0.1:18090
+BRIDGE_BIND_ADDR=127.0.0.1:8087
+BRIDGE_WECHAT_CALLBACK_PATH=/wechat
+BRIDGE_WECHAT_ENCRYPTED_CALLBACK_ENABLED=true
+BRIDGE_SAGE_WIKI_SOURCE_DIR=/data/workspace/sage-wiki/source
 
 WECHAT_APP_ID=wx...
 WECHAT_APP_SECRET=...
@@ -273,8 +276,6 @@ WECHAT_ENCODING_AES_KEY=...
 
 ADMIN_VIEW_KEY=...
 
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
 GEMINI_API_KEY=...
 TENCENT_LBS_KEY=...
 JINA_API_KEY=...
@@ -285,6 +286,7 @@ JINA_API_KEY=...
 - `.env` 不进 Git。
 - key 不写 SQLite。
 - 日志只打印 key 是否配置, 不打印值。
+- 其它配置不写入 `.env`, 除非 binary 默认值不符合当前部署。
 
 ### 4.2 `config.yaml`
 
@@ -1395,9 +1397,8 @@ After=network-online.target
 [Service]
 User=bridge
 WorkingDirectory=/data/workspace/sage-wiki-bridge-wxo
-EnvironmentFile=/data/workspace/sage-wiki-bridge-wxo/.env
 Environment=MALLOC_ARENA_MAX=2
-ExecStart=/data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh run
+ExecStart=/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env
 Restart=always
 RestartSec=3
 MemoryMax=256M

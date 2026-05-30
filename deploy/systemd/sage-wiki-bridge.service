@@ -8,9 +8,7 @@ Type=simple
 User=sagewiki
 Group=sagewiki
 WorkingDirectory=/data/workspace/sage-wiki-bridge-wxo
-EnvironmentFile=/data/workspace/sage-wiki-bridge-wxo/.env
-Environment=ENV_FILE=/data/workspace/sage-wiki-bridge-wxo/.env
-ExecStart=/data/workspace/sage-wiki-bridge-wxo/scripts/bridgectl.sh run
+ExecStart=/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20s

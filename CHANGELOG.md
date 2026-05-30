@@ -6,6 +6,20 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-30
+
+### Added
+
+- Binary-native operations commands: `doctor`, `health`, and `ready`.
+- Protected HTTP status endpoint at `{ADMIN_BASE_PATH}/status`, supporting `?key=` and `Authorization: Bearer` admin-key auth.
+- Runtime status output now includes config sources, endpoint paths, database/message/job counters, writable-dir checks, process id, and RSS memory where the OS exposes it.
+- Native `BRIDGE_*` dotenv aliases, so the binary can read the production `.env` directly without shell-side flag translation.
+
+### Changed
+
+- Systemd now starts `/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env` directly.
+- `scripts/bridgectl.sh` is now a thin compatibility wrapper for binary commands plus journald/systemctl helpers.
+
 ## [0.3.0] - 2026-05-30
 
 ### Added

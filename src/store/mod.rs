@@ -1,3 +1,4 @@
+use serde::Serialize;
 use sqlx::{
     Row, SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
@@ -131,7 +132,7 @@ pub struct MessageDetail {
     pub processed_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StatusSnapshot {
     pub total_messages: i64,
     pub authorized_messages: i64,
@@ -178,6 +179,14 @@ impl Store {
 
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    pub async fn ping(&self) -> Result<(), BridgeError> {
+        sqlx::query_scalar::<_, i64>("SELECT 1")
+            .fetch_one(&self.pool)
+            .await
+            .map(|_| ())
+            .map_err(|err| BridgeError::Database(err.to_string()))
     }
 
     pub async fn upsert_whitelist(
