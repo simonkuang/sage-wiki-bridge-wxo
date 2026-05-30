@@ -53,6 +53,7 @@ pub struct Job {
 pub struct StoredMessage {
     pub id: i64,
     pub wechat_msg_id: Option<String>,
+    pub from_openid: String,
     pub from_openid_hash: String,
     pub create_time: Option<i64>,
     pub received_at: String,
@@ -71,6 +72,12 @@ pub struct StoredMessage {
     pub link_description: Option<String>,
     pub link_url: Option<String>,
     pub raw_dir: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadAnchor {
+    pub message_key: String,
+    pub received_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -386,7 +393,7 @@ impl Store {
     pub async fn get_message(&self, message_id: i64) -> Result<StoredMessage, BridgeError> {
         let row = sqlx::query(
             r#"
-            SELECT id, wechat_msg_id, from_openid_hash, create_time, received_at,
+            SELECT id, wechat_msg_id, from_openid, from_openid_hash, create_time, received_at,
                    message_type, content_text,
                    media_id, thumb_media_id, pic_url, voice_format, voice_recognition,
                    location_lat, location_lng, location_scale, location_label,
@@ -404,6 +411,7 @@ impl Store {
         Ok(StoredMessage {
             id: row.get("id"),
             wechat_msg_id: row.get("wechat_msg_id"),
+            from_openid: row.get("from_openid"),
             from_openid_hash: row.get("from_openid_hash"),
             create_time: row.get("create_time"),
             received_at: row.get("received_at"),
@@ -423,6 +431,52 @@ impl Store {
             link_url: row.get("link_url"),
             raw_dir: row.get("raw_dir"),
         })
+    }
+
+    pub async fn find_ai_thread_anchor(
+        &self,
+        current_message_id: i64,
+        from_openid_hash: &str,
+        threshold_received_at: &str,
+    ) -> Result<Option<ThreadAnchor>, BridgeError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, wechat_msg_id, received_at
+            FROM messages AS candidate
+            WHERE candidate.from_openid_hash = ?1
+              AND candidate.id < ?2
+              AND candidate.received_at >= ?3
+              AND candidate.status = 'source_written'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM messages AS boundary
+                WHERE boundary.from_openid_hash = ?1
+                  AND boundary.id > candidate.id
+                  AND boundary.id < ?2
+                  AND boundary.status = 'command'
+                  AND TRIM(COALESCE(boundary.content_text, '')) = '/new'
+              )
+            ORDER BY candidate.received_at DESC, candidate.id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(from_openid_hash)
+        .bind(current_message_id)
+        .bind(threshold_received_at)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| BridgeError::Database(err.to_string()))?;
+
+        Ok(row.map(|row| {
+            let id = row.get::<i64, _>("id");
+            let message_key = row
+                .get::<Option<String>, _>("wechat_msg_id")
+                .unwrap_or_else(|| id.to_string());
+            ThreadAnchor {
+                message_key,
+                received_at: row.get("received_at"),
+            }
+        }))
     }
 
     pub async fn mark_message_source_written(

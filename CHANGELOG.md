@@ -6,9 +6,21 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-31
+
+### Added
+
+- AI source now writes `wechat-thread` blocks instead of standalone per-message compact entries.
+- Added `/new`, `/status`, and `/help` WeChat text commands for whitelisted users.
+- Added `--ai-source-thread-window-minutes` / `BRIDGE_AI_SOURCE_THREAD_WINDOW_MINUTES` with a default 30-minute grouping window.
+
+### Changed
+
+- AI source thread grouping now uses same OpenID, the configured time window, and `/new` command boundaries.
+
 ### Documentation
 
-- Added AI Source Format v1 design covering thread boundaries, `/new`, `/status`, `/help`, the default 30-minute grouping window, and notification policy.
+- Updated AI Source Format v1 and operations docs to describe the implemented thread output and command behavior.
 
 ## [0.5.0] - 2026-05-31
 

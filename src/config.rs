@@ -34,6 +34,10 @@ const FLAG_SPECS: &[(&str, &str)] = &[
         "--worker-processing-timeout-seconds",
         "WORKER_PROCESSING_TIMEOUT_SECONDS",
     ),
+    (
+        "--ai-source-thread-window-minutes",
+        "AI_SOURCE_THREAD_WINDOW_MINUTES",
+    ),
     ("--worker-retry-base-seconds", "WORKER_RETRY_BASE_SECONDS"),
     ("--worker-retry-max-seconds", "WORKER_RETRY_MAX_SECONDS"),
     ("--http-timeout-seconds", "HTTP_TIMEOUT_SECONDS"),
@@ -110,6 +114,10 @@ const ENV_ALIAS_SPECS: &[(&str, &str)] = &[
     (
         "BRIDGE_WORKER_PROCESSING_TIMEOUT_SECONDS",
         "WORKER_PROCESSING_TIMEOUT_SECONDS",
+    ),
+    (
+        "BRIDGE_AI_SOURCE_THREAD_WINDOW_MINUTES",
+        "AI_SOURCE_THREAD_WINDOW_MINUTES",
     ),
     (
         "BRIDGE_WORKER_RETRY_BASE_SECONDS",
@@ -211,6 +219,8 @@ Core:
       Default: source
   --sage-wiki-source-log-dir VALUE
       Default: data/source-log
+  --ai-source-thread-window-minutes VALUE
+      Default: 30
   --http-timeout-seconds VALUE
       Default: 30
   --request-body-limit-bytes VALUE
@@ -667,6 +677,7 @@ pub struct AppConfig {
     pub bridge_version: String,
     pub worker_interval: Duration,
     pub worker_processing_timeout: Duration,
+    pub ai_source_thread_window: Duration,
     pub worker_retry_base: Duration,
     pub worker_retry_max: Duration,
     pub http_timeout: Duration,
@@ -737,6 +748,9 @@ impl AppConfig {
                 "WORKER_PROCESSING_TIMEOUT_SECONDS",
                 15 * 60,
             )?),
+            ai_source_thread_window: Duration::from_secs(
+                get_u64(&lookup, "AI_SOURCE_THREAD_WINDOW_MINUTES", 30)? * 60,
+            ),
             worker_retry_base: Duration::from_secs(get_u64(
                 &lookup,
                 "WORKER_RETRY_BASE_SECONDS",
@@ -995,6 +1009,12 @@ fn config_report_entries(
             "WORKER_PROCESSING_TIMEOUT_SECONDS",
             "--worker-processing-timeout-seconds",
             app.worker_processing_timeout.as_secs(),
+            resolved,
+        ),
+        entry_u64(
+            "AI_SOURCE_THREAD_WINDOW_MINUTES",
+            "--ai-source-thread-window-minutes",
+            app.ai_source_thread_window.as_secs() / 60,
             resolved,
         ),
         entry_u64(
@@ -1480,6 +1500,7 @@ mod tests {
         assert!(help.contains("--bind-addr VALUE\n      Default: 127.0.0.1:8080"));
         assert!(help.contains("--database-url VALUE\n      Default: sqlite://data/bridge.sqlite3"));
         assert!(help.contains("--sage-wiki-source-log-dir VALUE\n      Default: data/source-log"));
+        assert!(help.contains("--ai-source-thread-window-minutes VALUE\n      Default: 30"));
         assert!(help.contains("--worker-enabled true|false\n      Default: true"));
         assert!(help.contains("--wechat-token VALUE\n      Default: none."));
         assert!(help.contains("--whitelist-join-command VALUE\n      Default: empty."));
@@ -1511,6 +1532,7 @@ mod tests {
             config.worker_processing_timeout,
             Duration::from_secs(15 * 60)
         );
+        assert_eq!(config.ai_source_thread_window, Duration::from_secs(30 * 60));
         assert_eq!(config.source_dir, PathBuf::from("source"));
         assert_eq!(config.source_log_dir, PathBuf::from("data/source-log"));
     }

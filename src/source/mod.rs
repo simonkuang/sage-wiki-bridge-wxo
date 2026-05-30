@@ -9,6 +9,7 @@ use crate::{error::BridgeError, preprocess::artifact::ProcessedArtifact};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceMetadata {
     pub wechat_msg_id: Option<String>,
+    pub thread_id: Option<String>,
     pub message_type: String,
     pub received_at: String,
     pub wechat_create_time: Option<i64>,
@@ -76,11 +77,18 @@ impl SourceWriter {
             },
             Err(err) => return Err(err.into()),
         };
-        let entry = match self.format {
-            SourceFormat::Ai => render_ai_entry(&message_key, artifact, metadata),
-            SourceFormat::DailyLog => render_daily_log_entry(&message_key, artifact, metadata),
+        let markdown = match self.format {
+            SourceFormat::Ai => {
+                let thread_id =
+                    sanitize_segment(metadata.thread_id.as_deref().unwrap_or(&message_key))?;
+                let item = render_ai_item(&message_key, artifact, metadata);
+                upsert_ai_thread_item(&current, &thread_id, &message_key, &item)
+            }
+            SourceFormat::DailyLog => {
+                let entry = render_daily_log_entry(&message_key, artifact, metadata);
+                upsert_daily_entry(&current, &message_key, &entry)
+            }
         };
-        let markdown = upsert_daily_entry(&current, &message_key, &entry);
         write_file_atomically(&path, markdown.as_bytes())?;
 
         Ok(SourceWriteResult {
@@ -113,24 +121,25 @@ fn render_daily_log_document_header(capture_date: &str, metadata: &SourceMetadat
     format!("{frontmatter}# WeChat captures {capture_date}\n")
 }
 
-fn render_ai_entry(
+fn render_ai_item(
     sanitized_message_key: &str,
     artifact: &ProcessedArtifact,
     metadata: &SourceMetadata,
 ) -> String {
     let mut entry = String::new();
-    entry.push_str(&format!("<!-- swb:start:{sanitized_message_key} -->\n\n"));
     entry.push_str(&format!(
-        "## {} {}\n\n",
-        readable_message_type(&metadata.message_type),
-        metadata.received_at
+        "<!-- swb:item:start:{sanitized_message_key} -->\n"
+    ));
+    entry.push_str(&format!(
+        "[{} {}]\n\n",
+        metadata.received_at, metadata.message_type
     ));
     entry.push_str(artifact.markdown_body.trim());
     entry.push_str("\n\n");
     if let Some(service) = &metadata.external_service {
         entry.push_str(&format!("_via {service}_\n\n"));
     }
-    entry.push_str(&format!("<!-- swb:end:{sanitized_message_key} -->\n"));
+    entry.push_str(&format!("<!-- swb:item:end:{sanitized_message_key} -->\n"));
     entry
 }
 
@@ -182,17 +191,8 @@ fn render_daily_log_entry(
 }
 
 fn upsert_daily_entry(current: &str, message_key: &str, entry: &str) -> String {
-    let (start_marker, end_marker) = if entry.starts_with("<!-- swb:start:") {
-        (
-            format!("<!-- swb:start:{message_key} -->"),
-            format!("<!-- swb:end:{message_key} -->"),
-        )
-    } else {
-        (
-            format!("<!-- sage-wiki-bridge-message-start:{message_key} -->"),
-            format!("<!-- sage-wiki-bridge-message-end:{message_key} -->"),
-        )
-    };
+    let start_marker = format!("<!-- sage-wiki-bridge-message-start:{message_key} -->");
+    let end_marker = format!("<!-- sage-wiki-bridge-message-end:{message_key} -->");
     let Some(start) = current.find(&start_marker) else {
         let mut next = current.trim_end().to_string();
         next.push_str("\n\n");
@@ -217,17 +217,69 @@ fn upsert_daily_entry(current: &str, message_key: &str, entry: &str) -> String {
     next
 }
 
-fn readable_message_type(message_type: &str) -> &str {
-    match message_type {
-        "text" => "Text",
-        "image" => "Image",
-        "voice" => "Voice",
-        "video" => "Video",
-        "shortvideo" => "Short Video",
-        "location" => "Location",
-        "link" => "Link",
-        other => other,
+fn upsert_ai_thread_item(current: &str, thread_id: &str, message_key: &str, item: &str) -> String {
+    let thread_start_marker = format!("<!-- swb:thread v=1 id={thread_id} -->");
+    let thread_end_marker = "<!-- /swb:thread -->";
+    let item_start_marker = format!("<!-- swb:item:start:{message_key} -->");
+    let item_end_marker = format!("<!-- swb:item:end:{message_key} -->");
+
+    let Some(thread_start) = current.find(&thread_start_marker) else {
+        let mut next = current.trim_end().to_string();
+        next.push_str("\n\n");
+        next.push_str(&thread_start_marker);
+        next.push_str("\n<<< wechat-thread >>>\n\n");
+        next.push_str(item.trim_end());
+        next.push_str("\n\n<<< /wechat-thread >>>\n");
+        next.push_str(thread_end_marker);
+        next.push('\n');
+        return next;
+    };
+
+    let Some(relative_thread_end) = current[thread_start..].find(thread_end_marker) else {
+        let mut next = current.trim_end().to_string();
+        next.push_str("\n\n");
+        next.push_str(&thread_start_marker);
+        next.push_str("\n<<< wechat-thread >>>\n\n");
+        next.push_str(item.trim_end());
+        next.push_str("\n\n<<< /wechat-thread >>>\n");
+        next.push_str(thread_end_marker);
+        next.push('\n');
+        return next;
+    };
+    let thread_end = thread_start + relative_thread_end;
+    let thread_body = &current[thread_start..thread_end];
+
+    if let Some(relative_item_start) = thread_body.find(&item_start_marker) {
+        if let Some(relative_item_end) = thread_body[relative_item_start..].find(&item_end_marker) {
+            let item_start = thread_start + relative_item_start;
+            let item_end =
+                thread_start + relative_item_start + relative_item_end + item_end_marker.len();
+            let mut next = String::new();
+            next.push_str(current[..item_start].trim_end());
+            next.push_str("\n");
+            next.push_str(item.trim_end());
+            next.push('\n');
+            next.push_str(current[item_end..].trim_start_matches('\n'));
+            return next;
+        }
     }
+
+    let insert_at = thread_body
+        .find("<<< /wechat-thread >>>")
+        .map(|relative| thread_start + relative)
+        .unwrap_or(thread_end);
+    let mut next = String::new();
+    next.push_str(current[..insert_at].trim_end());
+    next.push_str("\n\n");
+    next.push_str(item.trim_end());
+    next.push_str("\n\n");
+    next.push_str(current[insert_at..].trim_start_matches('\n'));
+    next
+}
+
+#[cfg(test)]
+fn count_occurrences(haystack: &str, needle: &str) -> usize {
+    haystack.matches(needle).count()
 }
 
 fn push_yaml_str(out: &mut String, key: &str, value: &str) {
@@ -324,6 +376,7 @@ mod tests {
     fn metadata() -> SourceMetadata {
         SourceMetadata {
             wechat_msg_id: Some("1000000000000000001".to_string()),
+            thread_id: None,
             message_type: "text".to_string(),
             received_at: "2026-05-27T21:30:15+08:00".to_string(),
             wechat_create_time: Some(1780000001),
@@ -419,11 +472,62 @@ mod tests {
 
         assert!(content.contains("source_type: \"wechat_ai_messages\""));
         assert!(content.contains("# WeChat Knowledge 2026-05-27"));
-        assert!(content.contains("## Text 2026-05-27T21:30:15+08:00"));
+        assert!(
+            content.contains("<!-- swb:thread v=1 id=20260527T133015Z_1000000000000000001 -->")
+        );
+        assert!(content.contains("<<< wechat-thread >>>"));
+        assert!(content.contains("[2026-05-27T21:30:15+08:00 text]"));
         assert!(content.contains("hello sage-wiki"));
-        assert!(content.contains("<!-- swb:start:20260527T133015Z_1000000000000000001 -->"));
+        assert!(content.contains("<!-- swb:item:start:20260527T133015Z_1000000000000000001 -->"));
+        assert!(content.contains("<<< /wechat-thread >>>"));
         assert!(!content.contains("### Metadata"));
         assert!(!content.contains("openid_hash"));
         assert!(!content.contains("raw_dir"));
+    }
+
+    #[test]
+    fn appends_multiple_items_to_same_ai_thread() {
+        let temp = tempfile::tempdir().unwrap();
+        let writer = SourceWriter::new(temp.path());
+        let first = ProcessedArtifact::new("msg_1", ProcessedArtifactKind::Text, "first");
+        let second = ProcessedArtifact::new("msg_2", ProcessedArtifactKind::Text, "second");
+        let mut first_metadata = metadata();
+        first_metadata.thread_id = Some("thread_1".to_string());
+        let mut second_metadata = metadata();
+        second_metadata.thread_id = Some("thread_1".to_string());
+        second_metadata.received_at = "2026-05-27T21:35:15+08:00".to_string();
+
+        let result = writer.write_source(&first, &first_metadata).unwrap();
+        writer.write_source(&second, &second_metadata).unwrap();
+        let content = fs::read_to_string(result.path).unwrap();
+
+        assert_eq!(
+            count_occurrences(&content, "<!-- swb:thread v=1 id=thread_1 -->"),
+            1
+        );
+        assert!(content.contains("<!-- swb:item:start:msg_1 -->"));
+        assert!(content.contains("<!-- swb:item:start:msg_2 -->"));
+        assert!(content.contains("[2026-05-27T21:35:15+08:00 text]"));
+    }
+
+    #[test]
+    fn upserts_existing_ai_thread_item() {
+        let temp = tempfile::tempdir().unwrap();
+        let writer = SourceWriter::new(temp.path());
+        let first = ProcessedArtifact::new("msg_1", ProcessedArtifactKind::Text, "old");
+        let second = ProcessedArtifact::new("msg_1", ProcessedArtifactKind::Text, "new");
+        let mut metadata = metadata();
+        metadata.thread_id = Some("thread_1".to_string());
+
+        let result = writer.write_source(&first, &metadata).unwrap();
+        writer.write_source(&second, &metadata).unwrap();
+        let content = fs::read_to_string(result.path).unwrap();
+
+        assert!(!content.contains("old"));
+        assert!(content.contains("new"));
+        assert_eq!(
+            count_occurrences(&content, "<!-- swb:item:start:msg_1 -->"),
+            1
+        );
     }
 }

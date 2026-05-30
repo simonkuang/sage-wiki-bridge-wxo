@@ -82,6 +82,7 @@ pub struct Worker {
     worker_id: String,
     bridge_version: String,
     retry_policy: RetryPolicy,
+    ai_source_thread_window: std::time::Duration,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -122,6 +123,7 @@ impl Worker {
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
             retry_policy: RetryPolicy::default(),
+            ai_source_thread_window: std::time::Duration::from_secs(30 * 60),
         }
     }
 
@@ -142,6 +144,7 @@ impl Worker {
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
             retry_policy: RetryPolicy::default(),
+            ai_source_thread_window: std::time::Duration::from_secs(30 * 60),
         }
     }
 
@@ -163,6 +166,7 @@ impl Worker {
             worker_id: worker_id.into(),
             bridge_version: bridge_version.into(),
             retry_policy: RetryPolicy::default(),
+            ai_source_thread_window: std::time::Duration::from_secs(30 * 60),
         }
     }
 
@@ -181,6 +185,11 @@ impl Worker {
 
     pub fn with_retry_policy(mut self, retry_policy: RetryPolicy) -> Self {
         self.retry_policy = retry_policy;
+        self
+    }
+
+    pub fn with_ai_source_thread_window(mut self, window: std::time::Duration) -> Self {
+        self.ai_source_thread_window = window;
         self
     }
 
@@ -233,6 +242,7 @@ impl Worker {
         let artifact = self.artifact_from_stored_message(&message).await?;
         self.save_processed_artifact(&artifact)?;
         let mut metadata = metadata_from_stored_message(&message, &self.bridge_version);
+        metadata.thread_id = Some(self.thread_id_for_message(&message).await?);
         if artifact.provider.is_some() {
             metadata.provider = artifact.provider.clone();
         }
@@ -261,6 +271,23 @@ impl Worker {
             "message processed"
         );
         Ok(result.path)
+    }
+
+    async fn thread_id_for_message(&self, message: &StoredMessage) -> Result<String, BridgeError> {
+        let Ok(received_at) = OffsetDateTime::parse(&message.received_at, &Rfc3339) else {
+            return Ok(message_key(message));
+        };
+        let window_seconds = self.ai_source_thread_window.as_secs().min(i64::MAX as u64) as i64;
+        let threshold = (received_at - TimeDuration::seconds(window_seconds))
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| message.received_at.clone());
+        let anchor = self
+            .store
+            .find_ai_thread_anchor(message.id, &message.from_openid_hash, &threshold)
+            .await?;
+        Ok(anchor
+            .map(|anchor| anchor.message_key)
+            .unwrap_or_else(|| message_key(message)))
     }
 
     fn save_processed_artifact(&self, artifact: &ProcessedArtifact) -> Result<(), BridgeError> {
@@ -490,6 +517,7 @@ fn common_from_stored_message(message: &StoredMessage) -> CommonFields {
 fn metadata_from_stored_message(message: &StoredMessage, bridge_version: &str) -> SourceMetadata {
     SourceMetadata {
         wechat_msg_id: message.wechat_msg_id.clone(),
+        thread_id: None,
         message_type: message.message_type.clone(),
         received_at: message.received_at.clone(),
         wechat_create_time: message.create_time,
@@ -699,6 +727,8 @@ mod tests {
         let source = std::fs::read_to_string(source_path).unwrap();
         assert!(source.contains("hello worker"));
         assert!(source.contains("source_type: \"wechat_ai_messages\""));
+        assert!(source.contains("<!-- swb:thread v=1 id=msg_text_1 -->"));
+        assert!(source.contains("<!-- swb:item:start:msg_text_1 -->"));
         assert!(!source.contains("### Metadata"));
         let log_source =
             std::fs::read_to_string(source_log_dir.path().join("2026-05-27.md")).unwrap();
@@ -899,6 +929,141 @@ mod tests {
         )
         .unwrap();
         assert!(lbs_json.contains("\"adcode\": \"440106\""));
+    }
+
+    #[tokio::test]
+    async fn worker_groups_adjacent_messages_into_ai_thread() {
+        let store = Store::connect("sqlite::memory:").await.unwrap();
+        store.migrate().await.unwrap();
+        let first_id = store
+            .insert_message_idempotent(&location_message())
+            .await
+            .unwrap();
+        store
+            .create_job_once(first_id, "process_message", "2026-05-27T21:30:15+08:00")
+            .await
+            .unwrap();
+        let second_id = store
+            .insert_message_idempotent(&MessageInsert {
+                request_id: "req_thread_text".to_string(),
+                wechat_msg_id: Some("msg_text_after_location".to_string()),
+                received_at: "2026-05-27T21:35:15+08:00".to_string(),
+                content_text: Some("这个定位代表我要记录的地方".to_string()),
+                raw_dir: "data/raw/msg_text_after_location".to_string(),
+                ..text_message()
+            })
+            .await
+            .unwrap();
+        store
+            .create_job_once(second_id, "process_message", "2026-05-27T21:35:15+08:00")
+            .await
+            .unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let worker = Worker::with_external_clients(
+            store,
+            SourceWriter::new(source_dir.path()),
+            Arc::new(FakeExternalClients),
+            "worker-1",
+            "0.1.0",
+        );
+
+        assert!(matches!(
+            worker
+                .process_next("2026-05-27T21:30:16+08:00")
+                .await
+                .unwrap(),
+            WorkOutcome::Done { .. }
+        ));
+        let outcome = worker
+            .process_next("2026-05-27T21:35:16+08:00")
+            .await
+            .unwrap();
+        let WorkOutcome::Done { source_path, .. } = outcome else {
+            panic!("expected done");
+        };
+        let source = std::fs::read_to_string(source_path).unwrap();
+
+        assert_eq!(
+            source
+                .matches("<!-- swb:thread v=1 id=msg_location_1 -->")
+                .count(),
+            1
+        );
+        assert!(source.contains("<!-- swb:item:start:msg_location_1 -->"));
+        assert!(source.contains("<!-- swb:item:start:msg_text_after_location -->"));
+        assert!(source.contains("这个定位代表我要记录的地方"));
+    }
+
+    #[tokio::test]
+    async fn worker_starts_new_ai_thread_after_new_command_boundary() {
+        let store = Store::connect("sqlite::memory:").await.unwrap();
+        store.migrate().await.unwrap();
+        let first_id = store
+            .insert_message_idempotent(&MessageInsert {
+                request_id: "req_before_new".to_string(),
+                wechat_msg_id: Some("msg_before_new".to_string()),
+                received_at: "2026-05-27T21:30:15+08:00".to_string(),
+                content_text: Some("old topic".to_string()),
+                raw_dir: "data/raw/msg_before_new".to_string(),
+                ..text_message()
+            })
+            .await
+            .unwrap();
+        store
+            .create_job_once(first_id, "process_message", "2026-05-27T21:30:15+08:00")
+            .await
+            .unwrap();
+        store
+            .insert_message_idempotent(&MessageInsert {
+                request_id: "req_new_command".to_string(),
+                wechat_msg_id: Some("msg_new_command".to_string()),
+                received_at: "2026-05-27T21:31:15+08:00".to_string(),
+                content_text: Some("/new".to_string()),
+                status: "command".to_string(),
+                raw_dir: "data/raw/msg_new_command".to_string(),
+                ..text_message()
+            })
+            .await
+            .unwrap();
+        let second_id = store
+            .insert_message_idempotent(&MessageInsert {
+                request_id: "req_after_new".to_string(),
+                wechat_msg_id: Some("msg_after_new".to_string()),
+                received_at: "2026-05-27T21:32:15+08:00".to_string(),
+                content_text: Some("new topic".to_string()),
+                raw_dir: "data/raw/msg_after_new".to_string(),
+                ..text_message()
+            })
+            .await
+            .unwrap();
+        store
+            .create_job_once(second_id, "process_message", "2026-05-27T21:32:15+08:00")
+            .await
+            .unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let worker = Worker::new(
+            store,
+            SourceWriter::new(source_dir.path()),
+            "worker-1",
+            "0.1.0",
+        );
+
+        worker
+            .process_next("2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap();
+        let outcome = worker
+            .process_next("2026-05-27T21:32:16+08:00")
+            .await
+            .unwrap();
+        let WorkOutcome::Done { source_path, .. } = outcome else {
+            panic!("expected done");
+        };
+        let source = std::fs::read_to_string(source_path).unwrap();
+
+        assert!(source.contains("<!-- swb:thread v=1 id=msg_before_new -->"));
+        assert!(source.contains("<!-- swb:thread v=1 id=msg_after_new -->"));
+        assert!(!source.contains("<!-- swb:item:start:msg_new_command -->"));
     }
 
     #[tokio::test]

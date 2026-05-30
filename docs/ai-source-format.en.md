@@ -1,6 +1,6 @@
 # AI Source Format v1
 
-This document defines the target AI-friendly source format written to `SAGE_WIKI_SOURCE_DIR`. The verbose audit format remains under `SAGE_WIKI_SOURCE_LOG_DIR` for debugging, recovery, and traceability.
+This document defines the AI-friendly source format written to `SAGE_WIKI_SOURCE_DIR`. The verbose audit format remains under `SAGE_WIKI_SOURCE_LOG_DIR` for debugging, recovery, and traceability.
 
 ## Goals
 
@@ -41,16 +41,20 @@ Bridge should keep this conservative and avoid complex semantic merging. Higher-
 AI source remains daily `YYYY-MM-DD.md`, but each file contains thread blocks:
 
 ```text
-<!-- swb:thread v=1 id=20260531T102000Z_abc123 start=2026-05-31T10:20:00Z end=2026-05-31T10:24:10Z messages=2 reason=time_window -->
+<!-- swb:thread v=1 id=20260531T102000Z_abc123 -->
 <<< wechat-thread >>>
 
+<!-- swb:item:start:20260531T102000Z_abc123 -->
 [2026-05-31T10:20:00Z location]
 Guangzhou Tianhe District...
 coordinates: 23.134521,113.358803
 adcode: 440106
+<!-- swb:item:end:20260531T102000Z_abc123 -->
 
+<!-- swb:item:start:20260531T102213Z_def456 -->
 [2026-05-31T10:22:13Z text]
 This is the store I mentioned. Traffic is weak, but the rent is high.
+<!-- swb:item:end:20260531T102213Z_def456 -->
 
 <<< /wechat-thread >>>
 <!-- /swb:thread -->
@@ -110,7 +114,7 @@ Recommended first phase:
 
 ## Configuration
 
-Planned setting:
+Setting:
 
 | Key | CLI | Default | Meaning |
 | --- | --- | --- | --- |
@@ -120,4 +124,4 @@ This is a quiet config with a production-safe default. It should usually be omit
 
 ## Implementation Note
 
-Version `0.5.0` already separates AI source and source log, but the AI source is still a transitional per-message compact format. The next implementation should follow this v1 spec: thread state, `/new`/`/status`/`/help`, thread upsert, and unchanged verbose source logs.
+Version `0.6.0` implements this first runtime contract: thread-level AI source, `/new`/`/status`/`/help` for whitelisted users, idempotent thread item upsert, and unchanged verbose source logs.

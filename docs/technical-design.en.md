@@ -155,7 +155,7 @@ Runtime inspection commands:
 - `GET {ADMIN_BASE_PATH}/status`: protected JSON status endpoint with config sources, process info, writable-dir checks, and message/job counters.
 - Packaged systemd deployments start `/usr/local/bin/sage-wiki-bridge --env-file /data/workspace/sage-wiki-bridge-wxo/.env` directly. `scripts/bridgectl.sh` remains a thin compatibility wrapper plus journald/systemctl helpers.
 
-Planned WeChat user commands are intentionally small in the first phase: `/new` starts a new AI source thread, `/status` returns processing status, and `/help` lists commands. Ordinary messages do not receive per-message replies by default.
+WeChat user commands are intentionally small in the first phase: `/new` starts a new AI source thread, `/status` returns processing status, and `/help` lists commands. Ordinary messages do not receive per-message replies by default.
 
 ## 9. External Services
 

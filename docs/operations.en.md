@@ -71,15 +71,15 @@ The running service also exposes protected JSON status:
 curl -H "Authorization: Bearer $ADMIN_VIEW_KEY" http://127.0.0.1:8087/admin/status
 ```
 
-## Planned User Commands
+## User Commands
 
-The planned first command set stays small:
+The first command set stays small:
 
 - `/new`: start a new topic boundary; the next non-command message enters a new AI source thread.
 - `/status`: query recent processing summary and failures.
 - `/help`: show a short command list.
 
-Ordinary messages do not receive per-message replies by default. See [AI Source Format v1](ai-source-format.en.md) for the target thread format, the default 30-minute grouping window, and implementation status.
+Ordinary messages do not receive per-message replies by default. See [AI Source Format v1](ai-source-format.en.md) for the thread format and the default 30-minute grouping window.
 
 ## Callback Debugging
 

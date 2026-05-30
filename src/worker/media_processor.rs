@@ -209,6 +209,7 @@ mod tests {
         StoredMessage {
             id: 1,
             wechat_msg_id: Some("msg_image_1".to_string()),
+            from_openid: "openid-user-1".to_string(),
             from_openid_hash: "sha256:abc".to_string(),
             create_time: Some(1780000001),
             received_at: "2026-05-27T21:30:15+08:00".to_string(),

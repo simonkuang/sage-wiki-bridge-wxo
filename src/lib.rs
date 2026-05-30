@@ -414,6 +414,7 @@ pub async fn run_with_report(
     )
     .with_log_source_writer(SourceWriter::daily_log(&config.source_log_dir))
     .with_processed_artifact_store(ProcessedArtifactStore::new(&config.processed_artifact_dir))
+    .with_ai_source_thread_window(config.ai_source_thread_window)
     .with_retry_policy(RetryPolicy {
         base_delay: config.worker_retry_base,
         max_delay: config.worker_retry_max,

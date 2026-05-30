@@ -1,6 +1,6 @@
 # AI Source Format v1
 
-本文定义 `sage-wiki-bridge` 写入 `SAGE_WIKI_SOURCE_DIR` 的 AI 友好 source 目标格式。旧版详细日志格式继续写入 `SAGE_WIKI_SOURCE_LOG_DIR`，用于审计、排错和还原。
+本文定义 `sage-wiki-bridge` 写入 `SAGE_WIKI_SOURCE_DIR` 的 AI 友好 source 格式。旧版详细日志格式继续写入 `SAGE_WIKI_SOURCE_LOG_DIR`，用于审计、排错和还原。
 
 ## 设计目标
 
@@ -45,17 +45,21 @@ AI source 的基本知识单元是 `wechat-thread`，不是单条微信消息。
 AI source 仍按天写入 `YYYY-MM-DD.md`，但每天文件内由多个 thread block 组成。
 
 ```text
-<!-- swb:thread v=1 id=20260531T102000Z_abc123 start=2026-05-31T10:20:00Z end=2026-05-31T10:24:10Z messages=2 reason=time_window -->
+<!-- swb:thread v=1 id=20260531T102000Z_abc123 -->
 <<< wechat-thread >>>
 
+<!-- swb:item:start:20260531T102000Z_abc123 -->
 [2026-05-31T10:20:00Z location]
 广东省广州市天河区...
 坐标: 23.134521,113.358803
 行政区划: 广东省 / 广州市 / 天河区
 adcode: 440106
+<!-- swb:item:end:20260531T102000Z_abc123 -->
 
+<!-- swb:item:start:20260531T102213Z_def456 -->
 [2026-05-31T10:22:13Z text]
 这里就是我刚才说的那个门店，客流很差，但租金还很贵。
+<!-- swb:item:end:20260531T102213Z_def456 -->
 
 <<< /wechat-thread >>>
 <!-- /swb:thread -->
@@ -172,7 +176,7 @@ adcode: 440106
 
 ## 配置
 
-计划配置项:
+配置项:
 
 | Key | CLI | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -182,9 +186,9 @@ adcode: 440106
 
 ## 实现备注
 
-当前 `0.5.0` 已经把 AI source 和 source log 分开，但 AI source 仍是过渡版的逐消息精简格式。下一步实现应以本文 `AI Source Format v1` 为准:
+`0.6.0` 已实现本文定义的第一版运行契约:
 
-- 增加 thread 状态或可重建的 thread id。
-- 实现 `/new`、`/status`、`/help`。
-- 按 thread upsert AI source。
+- 使用 thread 作为 AI source 的主要知识单元。
+- `/new`、`/status`、`/help` 仅对白名单用户生效。
+- AI source 按 thread item 幂等 upsert。
 - source log 保持逐消息详细格式不变。

@@ -15,13 +15,24 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use crate::{
     archive::RawArchive,
     error::BridgeError,
-    store::{MessageInsert, Store},
+    store::{MessageInsert, StatusSnapshot, Store},
     wechat::{
         IncomingMessage, OpenId, OpenIdHash,
         crypto::{decrypt_callback_message, encrypt_reply_message, parse_encrypted_envelope},
         parse_plain_message, verify_signature,
     },
 };
+
+const COMMAND_NEW: &str = "/new";
+const COMMAND_STATUS: &str = "/status";
+const COMMAND_HELP: &str = "/help";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UserCommand {
+    New,
+    Status,
+    Help,
+}
 
 #[derive(Debug, Clone)]
 pub struct ReceiverConfig {
@@ -256,9 +267,12 @@ async fn process_plain_xml(
     let supported = message.is_supported();
     let whitelist_join_requested =
         is_whitelist_join_command(&message, state.config.whitelist_join_command.as_deref());
+    let user_command = detect_user_command(&message);
 
     let status = if whitelist_join_requested {
         "whitelisted"
+    } else if authorized && user_command.is_some() {
+        "command"
     } else if authorized && supported {
         "queued"
     } else {
@@ -335,6 +349,34 @@ async fn process_plain_xml(
         return Ok(None);
     }
 
+    if authorized {
+        if let Some(command) = user_command {
+            tracing::info!(
+                component = "receiver",
+                message_id,
+                openid_hash = %OpenIdHash::sha256_for_display(&common.from_user_name),
+                command = ?command,
+                encrypt_type = encrypt_type.unwrap_or("plain"),
+                "wechat user command handled"
+            );
+            let reply = match command {
+                UserCommand::New => "已开始新的话题。".to_string(),
+                UserCommand::Help => {
+                    "可用命令：/new 开启新话题；/status 查看处理状态；/help 查看帮助。".to_string()
+                }
+                UserCommand::Status => {
+                    let snapshot = state.store.status_snapshot().await?;
+                    render_status_reply(&snapshot)
+                }
+            };
+            return Ok(Some(passive_text_reply(
+                &common.from_user_name,
+                &common.to_user_name,
+                &reply,
+            )));
+        }
+    }
+
     if authorized && supported {
         let job_id = state
             .store
@@ -390,6 +432,39 @@ fn is_whitelist_join_command(message: &IncomingMessage, command: Option<&str>) -
         message,
         IncomingMessage::Text(text) if text.content.trim() == command
     )
+}
+
+fn detect_user_command(message: &IncomingMessage) -> Option<UserCommand> {
+    let IncomingMessage::Text(text) = message else {
+        return None;
+    };
+    match text.content.trim() {
+        COMMAND_NEW => Some(UserCommand::New),
+        COMMAND_STATUS => Some(UserCommand::Status),
+        COMMAND_HELP => Some(UserCommand::Help),
+        _ => None,
+    }
+}
+
+fn render_status_reply(snapshot: &StatusSnapshot) -> String {
+    let pending_jobs = grouped_count(&snapshot.jobs_by_status, "pending");
+    let processing_jobs = grouped_count(&snapshot.jobs_by_status, "processing");
+    format!(
+        "已接收 {} 条，已写入 {} 条，失败 {} 条，待处理 {} 条，处理中 {} 条，重试 {} 次。",
+        snapshot.total_messages,
+        snapshot.source_written_messages,
+        snapshot.failed_messages,
+        pending_jobs,
+        processing_jobs,
+        snapshot.retry_attempts
+    )
+}
+
+fn grouped_count(counts: &[(String, i64)], key: &str) -> i64 {
+    counts
+        .iter()
+        .find_map(|(name, count)| (name == key).then_some(*count))
+        .unwrap_or(0)
 }
 
 fn media_id(message: &IncomingMessage) -> Option<String> {
@@ -709,6 +784,103 @@ mod tests {
             .await
             .unwrap();
         assert!(authorized);
+    }
+
+    #[tokio::test]
+    async fn post_callback_new_command_records_boundary_without_job() {
+        let state = test_state(false).await;
+        let store = state.store.clone();
+        let app = router(state);
+        let uri = signed_path("/wechat/callback", "bridge-token", "1780000000", "nonce1");
+        let xml = include_str!("../../tests/fixtures/wechat/text.xml")
+            .replace("把这条知识存进 sage-wiki", " /new ");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .body(Body::from(xml))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let reply = String::from_utf8(body.to_vec()).unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(reply.contains("<Content><![CDATA[已开始新的话题。]]></Content>"));
+        let job_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(job_count, 0);
+        let message_status: String = sqlx::query_scalar("SELECT status FROM messages LIMIT 1")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(message_status, "command");
+    }
+
+    #[tokio::test]
+    async fn post_callback_status_command_replies_summary() {
+        let state = test_state(false).await;
+        let store = state.store.clone();
+        let app = router(state);
+        let uri = signed_path("/wechat/callback", "bridge-token", "1780000000", "nonce1");
+        let xml = include_str!("../../tests/fixtures/wechat/text.xml")
+            .replace("把这条知识存进 sage-wiki", " /status ");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .body(Body::from(xml))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let reply = String::from_utf8(body.to_vec()).unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(reply.contains("已接收 1 条"));
+        assert!(reply.contains("已写入 0 条"));
+        let job_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(job_count, 0);
+    }
+
+    #[tokio::test]
+    async fn post_callback_help_command_replies_help() {
+        let state = test_state(false).await;
+        let app = router(state);
+        let uri = signed_path("/wechat/callback", "bridge-token", "1780000000", "nonce1");
+        let xml = include_str!("../../tests/fixtures/wechat/text.xml")
+            .replace("把这条知识存进 sage-wiki", " /help ");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .body(Body::from(xml))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let reply = String::from_utf8(body.to_vec()).unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(reply.contains("/new 开启新话题"));
+        assert!(reply.contains("/status 查看处理状态"));
     }
 
     #[tokio::test]

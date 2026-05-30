@@ -373,7 +373,7 @@ MVP 使用 OpenID 白名单:
 
 白名单加入 command 仍由 `--whitelist-join-command` 单独配置, 不和上述 command 混用。
 
-AI source 的目标 thread 边界默认按同一 OpenID 和 30 分钟窗口保守聚合, `/new` 是用户显式切分上下文的方式。详细格式和当前实现状态见 [AI Source Format v1](ai-source-format.zh-CN.md)。
+AI source 的 thread 边界默认按同一 OpenID 和 30 分钟窗口保守聚合, `/new` 是用户显式切分上下文的方式。详细格式见 [AI Source Format v1](ai-source-format.zh-CN.md)。
 
 ### 6.14 蜜罐逻辑
 
