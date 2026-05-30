@@ -17,6 +17,7 @@ use crate::{
     wechat::{OpenId, UrlString, WechatMsgId},
 };
 use time::{Duration as TimeDuration, OffsetDateTime, format_description::well_known::Rfc3339};
+use url::Url;
 
 pub type WorkerFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, BridgeError>> + Send + 'a>>;
 
@@ -288,11 +289,7 @@ impl Worker {
         message: &StoredMessage,
     ) -> Result<ProcessedArtifact, BridgeError> {
         match message.message_type.as_str() {
-            "text" => Ok(ProcessedArtifact::new(
-                message_key(message),
-                ProcessedArtifactKind::Text,
-                message.content_text.clone().unwrap_or_default(),
-            )),
+            "text" => self.text_artifact_from_stored_message(message).await,
             "location" => {
                 let latitude = message.location_lat.ok_or_else(|| {
                     BridgeError::ExternalPayloadInvalid("location_lat missing".to_string())
@@ -340,6 +337,133 @@ impl Worker {
             ))),
         }
     }
+
+    async fn text_artifact_from_stored_message(
+        &self,
+        message: &StoredMessage,
+    ) -> Result<ProcessedArtifact, BridgeError> {
+        let content = message.content_text.clone().unwrap_or_default();
+        let urls = extract_http_urls(&content);
+        if urls.is_empty() {
+            return Ok(ProcessedArtifact::new(
+                message_key(message),
+                ProcessedArtifactKind::Text,
+                content,
+            ));
+        }
+
+        let mut body = String::new();
+        body.push_str("## Original Text\n\n");
+        body.push_str(content.trim());
+        body.push_str("\n\n## Reader Content\n\n");
+
+        let mut payload_paths = Vec::new();
+        for (index, url) in urls.iter().enumerate() {
+            let markdown = self.external_clients.read_link(url).await?;
+            if let Some(path) = self.save_named_processed_payload(
+                message,
+                &format!("text-link-{}.jina-reader.md", index + 1),
+                markdown.as_bytes(),
+            )? {
+                payload_paths.push(path);
+            }
+            body.push_str(&format!("### {}\n\n", url));
+            body.push_str(markdown.trim());
+            body.push_str("\n\n");
+        }
+
+        let mut artifact =
+            ProcessedArtifact::new(message_key(message), ProcessedArtifactKind::Text, body);
+        artifact.external_service = Some("jina_reader".to_string());
+        artifact.processed_payload_paths = payload_paths;
+        Ok(artifact)
+    }
+}
+
+fn extract_http_urls(text: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut offset = 0;
+    while offset < text.len() {
+        let remaining = &text[offset..];
+        let Some(relative_start) = find_next_url_start(remaining) else {
+            break;
+        };
+        let start = offset + relative_start;
+        let after_start = &text[start..];
+        let relative_end = after_start
+            .char_indices()
+            .find_map(|(index, ch)| url_delimiter(ch).then_some(index))
+            .unwrap_or(after_start.len());
+        let raw = &after_start[..relative_end];
+        let candidate = trim_url_token(raw);
+        if is_http_url(candidate) && !urls.iter().any(|url| url == candidate) {
+            urls.push(candidate.to_string());
+        }
+        offset = start + relative_end.max(1);
+    }
+    urls
+}
+
+fn find_next_url_start(value: &str) -> Option<usize> {
+    match (value.find("https://"), value.find("http://")) {
+        (Some(https), Some(http)) => Some(https.min(http)),
+        (Some(https), None) => Some(https),
+        (None, Some(http)) => Some(http),
+        (None, None) => None,
+    }
+}
+
+fn url_delimiter(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '<' | '>'
+                | '"'
+                | '\''
+                | '“'
+                | '”'
+                | '‘'
+                | '’'
+                | '，'
+                | '。'
+                | '；'
+                | '：'
+                | '！'
+                | '？'
+                | '、'
+        )
+}
+
+fn trim_url_token(value: &str) -> &str {
+    value.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '.' | ','
+                | ';'
+                | ':'
+                | '!'
+                | '?'
+                | ')'
+                | ']'
+                | '}'
+                | '，'
+                | '。'
+                | '；'
+                | '：'
+                | '！'
+                | '？'
+                | '）'
+                | '】'
+                | '》'
+                | '、'
+        )
+    })
+}
+
+fn is_http_url(value: &str) -> bool {
+    Url::parse(value)
+        .map(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        .unwrap_or(false)
 }
 
 fn common_from_stored_message(message: &StoredMessage) -> CommonFields {
@@ -575,6 +699,60 @@ mod tests {
             .unwrap();
         assert_eq!(message_status, "source_written");
         assert_eq!(job_status, "done");
+    }
+
+    #[tokio::test]
+    async fn worker_expands_urls_inside_text_with_jina_reader() {
+        let store = store_with_job(MessageInsert {
+            content_text: Some(
+                "你看看这个嘛\n\nhttps://example.com/article\n\n我觉得够判断了".to_string(),
+            ),
+            ..text_message()
+        })
+        .await;
+        let source_dir = tempfile::tempdir().unwrap();
+        let processed_dir = tempfile::tempdir().unwrap();
+        let worker = Worker::with_external_clients(
+            store,
+            SourceWriter::new(source_dir.path()),
+            Arc::new(FakeExternalClients),
+            "worker-1",
+            "0.1.0",
+        )
+        .with_processed_artifact_store(ProcessedArtifactStore::new(processed_dir.path()));
+
+        let outcome = worker
+            .process_next("2026-05-27T21:30:16+08:00")
+            .await
+            .unwrap();
+
+        let WorkOutcome::Done { source_path, .. } = outcome else {
+            panic!("expected done");
+        };
+        let source = std::fs::read_to_string(source_path).unwrap();
+        assert!(source.contains("## Original Text"));
+        assert!(source.contains("## Reader Content"));
+        assert!(source.contains("https://example.com/article"));
+        assert!(source.contains("这是 Jina Reader 返回的 Markdown 内容"));
+        let reader_payload = std::fs::read_to_string(
+            processed_dir
+                .path()
+                .join("msg_text_1")
+                .join("text-link-1.jina-reader.md"),
+        )
+        .unwrap();
+        assert!(reader_payload.contains("这是 Jina Reader 返回的 Markdown 内容"));
+    }
+
+    #[test]
+    fn extracts_urls_from_text() {
+        assert_eq!(
+            extract_http_urls("看这个：https://example.com/a?b=1。再看 https://example.org/x)."),
+            vec![
+                "https://example.com/a?b=1".to_string(),
+                "https://example.org/x".to_string()
+            ]
+        );
     }
 
     #[tokio::test]

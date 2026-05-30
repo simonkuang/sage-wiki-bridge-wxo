@@ -6,6 +6,12 @@ This project follows semantic versioning. Feature and fix changes must update bo
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-30
+
+### Fixed
+
+- Text messages that contain HTTP(S) URLs now call Jina Reader and include the fetched reader content in processed output instead of writing only the original URL text.
+
 ## [0.4.1] - 2026-05-30
 
 ### Fixed
